@@ -1,4 +1,5 @@
-![Status](https://img.shields.io/badge/status-prototype-red)
+[![Build Status](https://github.com/fritzo/nohm/workflows/CI/badge.svg)](https://github.com/fritzo/nohm/actions)
+![Maturity](https://img.shields.io/badge/maturity-prototype-red)
 
 # NOHM: Nondeterministic Optimal Higher-order Machine
 
