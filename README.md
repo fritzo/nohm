@@ -1,2 +1,1 @@
-# nohm
-Nondeterministic Optimal Higher-order Machine
+# Nondeterministic Optimal Higher-order Machine
