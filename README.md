@@ -3,21 +3,22 @@
 # NOHM: Nondeterministic Optimal Higher-order Machine
 
 This is a research implementation of optimal beta reduction
-[Asperti98a](#Asperti98a), combining implementation ideas of
-[Asperti98b](#Asperti98b) with engineering tricks of [Taelin22](#Taelin22).
+([Asperti98a](#Asperti98a)), combining implementation ideas of BOHM
+([Asperti98b](#Asperti98b)) with engineering tricks of HVM
+([Taelin22](#Taelin22)).
 
 The target language is pure untyped nondeterministic &lambda;-calculus
-[Hindley08](#Hindley08), that is the language with function abstraction,
+([Hindley08](#Hindley08)), that is the language with function abstraction,
 function application, bound variables, and nondeterministic parallel binary
 choice.
-The NOHM aims to implement types as closures [Scott76](#Scott76) (increasing
-idempotent functions) following the rich type system developed in
-[Obermeyer09](#Obermeyer09).
+The NOHM aims to implement types as closures ([Scott76](#Scott76)) (increasing
+idempotent functions) together with a rich type system of closures
+([Obermeyer09](#Obermeyer09)).
 It remains to be seen whether this is feasible.
 
-The engineering plan is to create a verbose easily debuggable Python runtime
-together with a highly-optimized C runtime, similar to HVM's hybrid Rust+C
-architecture [Taelin22](#Taelin22).
+The engineering plan is to create a readable and easily debuggable Python
+runtime together with an equivalent but highly-optimized C runtime, similar to
+HVM's hybrid Rust+C architecture ([Taelin22](#Taelin22)).
 This architecture allows unit tests to be written in Python.
 
 ## References

@@ -2,15 +2,18 @@ import re
 
 import pytest
 
-from nohm.runtime import _gensym, parse, re_varname, readback, reduce, validate
+from nohm.runtime import gensym, parse, re_varname, readback, reduce, validate
 
 
 def test_gensym():
-    assert _gensym(0) == "a"
-    assert _gensym(1) == "b"
-    assert _gensym(25) == "z"
-    assert _gensym(26) == "aa"
-    assert _gensym(27) == "ab"
+    assert gensym(0) == "a"
+    assert gensym(1) == "b"
+    assert gensym(2) == "c"
+    assert gensym(25) == "z"
+    assert gensym(26) == "aa"
+    assert gensym(27) == "ab"
+    assert gensym(28) == "ac"
+    assert gensym(26 + 26**2) == "aaa"
 
 
 def normalize_text(text):
@@ -24,7 +27,7 @@ def normalize_text(text):
     for i, token in enumerate(tokens):
         if re_varname.match(token):
             if token not in rename:
-                rename[token] = _gensym(len(rename))
+                rename[token] = gensym(len(rename))
             tokens[i] = rename[token]
     return " ".join(tokens)
 

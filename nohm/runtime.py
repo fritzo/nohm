@@ -470,7 +470,7 @@ def _readback(port: str, term: Term, env: Dict[Term, str]) -> List[str]:
     if isinstance(term, LAM):
         if port == "out":
             # FIXME this breaks under shared LAM terms
-            name = _gensym(len(env))
+            name = gensym(len(env))
             env[term] = name
             body = _readback(*safe(term.body), env)
             return body + [name, "LAM"]
@@ -489,7 +489,7 @@ def _readback(port: str, term: Term, env: Dict[Term, str]) -> List[str]:
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
 
-def _gensym(i: int) -> str:
+def gensym(i: int) -> str:
     """
     a,b,...,z,aa,ab,...,az,ba,bb,...,zz,aaa,...
     """

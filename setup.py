@@ -35,7 +35,14 @@ setup(
     name="nohm",
     version="0.0.0",
     description="Nondeterministic Optimal Higher-order Machine",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     packages=find_packages(include=["nohm", "nohm.*"]),
+    entry_points={
+        "console_scripts": [
+            "nohm.benchmark=nohm.benchmark:main",
+        ],
+    },
     url="https://github.com/fritzo/nohm",
     author="Fritz Obermeyer",
     python_requires=">=3.7",
@@ -50,8 +57,6 @@ setup(
             "pytest-xdist",
         ],
     },
-    long_description=long_description,
-    long_description_content_type="text/markdown",
     keywords="functional programming language interaction nets",
     classifiers=[
         "Intended Audience :: Science/Research",
