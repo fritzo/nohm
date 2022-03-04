@@ -24,34 +24,49 @@ This architecture allows unit tests to be written in Python.
 
 ## References
 
-- [Asperti98a] <a name="Asperti98a" />
-  Andrea Asperti, Stefano Guerrini (1998)
-  "The optimal implementation of functional programming languages"
-- [Asperti98b] <a name="Asperti98b" />
-  Andrea Asperti, Stefano Guerrini (1998)
-  "Bolonga Optimal Higher-order Machine (BOHM)"
-  https://github.com/asperti/BOHM1.1
-- [Hindley08] <a name="Hindley08" />
-  J. Roger Hindley, J.P. Seldin (2008)
-  "Lambda calculus and combinatory logic: an introduction"
-- [Obermeyer09] <a name="Obermeyer09" />
-  Fritz Obermeyer (2009)
-  "Automated equational reasoning in nondeterministic &lambda;-calculi modulo
-  theories H*"
-  http://fritzo.org/thesis.pdf
-- [Salikhmetov17] <a name="Salikhmetov17" />
-  Anton Salikhmetov (2017)
-  "inet-lib: JavaScript Engine for Interaction Nets"
-  https://github.com/codedot/inet-lib
-- [Scott76] <a name="Scott76" />
-  Dana Scott (1976)
-  "Datatypes as Lattices"
-  http://www.cs.ox.ac.uk/files/3287/PRG05.pdf"
-- [Taelin22] <a name="Taelin22" />
-  Victor Taelin et al. (2022)
-  "Higher-order Virtual Machine (HVM)"
-  https://github.com/Kindelia/HVM
-  https://github.com/Kindelia/HVM/blob/master/HOW.md
+<dl>
+<dt> Asperti98a <a name="Asperti98a" /> </dt>
+    <dd>
+    Andrea Asperti, Stefano Guerrini (1998)
+    "The optimal implementation of functional programming languages"
+    </dd>
+<dt> Asperti98b] <a name="Asperti98b" /> </dt>
+    <dd>
+    Andrea Asperti, Stefano Guerrini (1998)
+    "Bolonga Optimal Higher-order Machine (BOHM)"
+    https://github.com/asperti/BOHM1.1
+    </dd>
+<dt> Hindley08 <a name="Hindley08" /> </dt>
+    <dd>
+    J. Roger Hindley, J.P. Seldin (2008)
+    "Lambda calculus and combinatory logic: an introduction"
+    </dd>
+<dt> Obermeyer09 <a name="Obermeyer09" /> </dt>
+    <dd>
+    Fritz Obermeyer (2009)
+    "Automated equational reasoning in nondeterministic &lambda;-calculi modulo theories H*"
+    http://fritzo.org/thesis.pdf
+    </dd>
+<dt> Salikhmetov17] <a name="Salikhmetov17" /> </dt>
+    <dd>
+    Anton Salikhmetov (2017)
+    "inet-lib: JavaScript Engine for Interaction Nets"
+    https://github.com/codedot/inet-lib
+    </dd>
+<dt> Scott76] <a name="Scott76" />
+    <dd>
+    Dana Scott (1976)
+    "Datatypes as Lattices"
+    http://www.cs.ox.ac.uk/files/3287/PRG05.pdf"
+    </dd>
+<dt> Taelin22] <a name="Taelin22" /> </dt>
+    <dd>
+    Victor Taelin et al. (2022)
+    "Higher-order Virtual Machine (HVM)"
+    https://github.com/Kindelia/HVM
+    https://github.com/Kindelia/HVM/blob/master/HOW.md
+    </dd>
+</dl>
 
 ## License
 
