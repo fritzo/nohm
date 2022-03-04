@@ -9,7 +9,7 @@ This is a research implementation of optimal beta reduction
 ([Taelin22](#Taelin22)).
 
 The target language is pure untyped nondeterministic &lambda;-calculus
-([Hindley08](#Hindley08)), that is the language with function abstraction,
+([Barendregt84](#Barendregt84),[Hindley08](#Hindley08)), that is the language with function abstraction,
 function application, bound variables, and nondeterministic parallel binary
 choice.
 The NOHM aims to implement types as closures ([Scott76](#Scott76)) (increasing
@@ -29,13 +29,19 @@ This architecture allows unit tests to be written in Python.
     <dd>
     Andrea Asperti, Stefano Guerrini (1998)
     "The optimal implementation of functional programming languages"
+    (<a href="https://books.google.com/books?id=Bod5HbPh-WwC">book</a>)
     </dd>
-<dt> Asperti98b] <a name="Asperti98b" /> </dt>
+<dt> Asperti98b <a name="Asperti98b" /> </dt>
     <dd>
     Andrea Asperti, Stefano Guerrini (1998)
     "Bolonga Optimal Higher-order Machine (BOHM)"
-    https://github.com/asperti/BOHM1.1
+    (<a href="https://github.com/asperti/BOHM1.1">code</a>)
     </dd>
+<dt>Barendregt84 <a name="Barendregt84" /> </dt>
+    <dd>
+    Hendrik Barendregt (1984)
+    "The lambda calculus: its syntax and semantics"
+    (<a href="https://books.google.com/books?id=eMtTAAAAYAAJ">book</a>)
 <dt> Hindley08 <a name="Hindley08" /> </dt>
     <dd>
     J. Roger Hindley, J.P. Seldin (2008)
@@ -45,26 +51,28 @@ This architecture allows unit tests to be written in Python.
     <dd>
     Fritz Obermeyer (2009)
     "Automated equational reasoning in nondeterministic &lambda;-calculi modulo theories H*"
-    http://fritzo.org/thesis.pdf
+    (<a href="http://fritzo.org/thesis.pdf">thesis</a> |
+    <a href="https://github.com/fritzo/pomagma">code</a>)
     </dd>
-<dt> Salikhmetov17] <a name="Salikhmetov17" /> </dt>
+<dt> Salikhmetov17 <a name="Salikhmetov17" /> </dt>
     <dd>
     Anton Salikhmetov (2017)
     "inet-lib: JavaScript Engine for Interaction Nets"
-    https://github.com/codedot/inet-lib
+    (<a href="https://github.com/codedot/inet-lib">code</a> |
+    <a href="https://arxiv.org/abs/1702.06092">paper</a>)
     </dd>
-<dt> Scott76] <a name="Scott76" />
+<dt> Scott76 <a name="Scott76" />
     <dd>
     Dana Scott (1976)
     "Datatypes as Lattices"
-    http://www.cs.ox.ac.uk/files/3287/PRG05.pdf"
+    (<a href="http://www.cs.ox.ac.uk/files/3287/PRG05.pdf">paper</a>)
     </dd>
-<dt> Taelin22] <a name="Taelin22" /> </dt>
+<dt> Taelin22 <a name="Taelin22" /> </dt>
     <dd>
     Victor Taelin et al. (2022)
     "Higher-order Virtual Machine (HVM)"
-    https://github.com/Kindelia/HVM
-    https://github.com/Kindelia/HVM/blob/master/HOW.md
+    (<a href="https://github.com/Kindelia/HVM">code</a> |
+    <a href="https://github.com/Kindelia/HVM/blob/master/HOW.md">docs</a>)
     </dd>
 </dl>
 
