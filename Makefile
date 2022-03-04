@@ -7,7 +7,7 @@ lint: FORCE
 	flake8
 	black --check .
 	isort --check .
-	mypy .
+	mypy *.py nohm test
 
 format: FORCE
 	black .
