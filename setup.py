@@ -38,6 +38,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=find_packages(include=["nohm", "nohm.*"]),
+    package_data={"nohm": ["py.typed"]},
     entry_points={
         "console_scripts": [
             "nohm.benchmark=nohm.benchmark:main",

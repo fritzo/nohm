@@ -306,7 +306,7 @@ re_int = re.compile("[0-9]+$")
 Env = Dict[str, Tuple[str, Term]]
 
 
-def parse(text: str) -> Term:
+def parse(text: str) -> Tuple[str, Term]:
     """
     Parse a Polish notation string to create a term graph.
 
@@ -323,7 +323,7 @@ def parse(text: str) -> Term:
     if DEBUG:
         validate(term)
     assert not tokens, f"Extra input: {' '.join(tokens)}"
-    return term
+    return port, term
 
 
 def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
@@ -443,11 +443,10 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
 # Readback : graph -> text
 
 
-def readback(term: Term) -> str:
+def readback(port: str, term: Term) -> str:
     env: Dict[Term, str] = {}
     if not isinstance(term, (LAM, APP)):
         raise NotImplementedError(f"Unsupported term: {type(term).__name__}")
-    port = "out"
     tokens = _readback(port, term, env)
     tokens.reverse()
     return " ".join(tokens)
@@ -528,6 +527,7 @@ def validate(root):
 
 
 __all__ = [
+    "collect",
     "parse",
     "readback",
     "reduce",

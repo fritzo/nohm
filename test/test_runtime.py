@@ -71,9 +71,9 @@ PARSE_EXAMPLES = [
 @pytest.mark.parametrize("text,_", PARSE_EXAMPLES)
 def test_parse_readback(text, _):
     expected = normalize_text(text)
-    term = parse(text)
+    port, term = parse(text)
     validate(term)
-    actual = readback(term)
+    actual = readback(port, term)
     assert actual == expected
 
     # Check for memory leaks.
@@ -99,9 +99,9 @@ REDUCE_EXAMPLES = [
 
 @pytest.mark.parametrize("text,redtext", REDUCE_EXAMPLES)
 def test_reduce(text, redtext):
-    term = parse(text)
+    port, term = parse(text)
     validate(term)
-    port, term = reduce("out", term)
+    port, term = reduce(port, term)
     validate(term)
-    actual = readback(term)
+    actual = readback(port, term)
     assert actual == redtext
