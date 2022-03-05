@@ -1,8 +1,23 @@
+import gc
 import re
+from collections import Counter
 
 import pytest
 
-from nohm.runtime import gensym, parse, re_varname, readback, reduce, validate
+from nohm.runtime import (
+    Term,
+    collect,
+    gensym,
+    parse,
+    re_varname,
+    readback,
+    reduce,
+    validate,
+)
+
+
+def get_term_stats():
+    return Counter(type(o) for o in gc.get_objects() if isinstance(o, Term))
 
 
 def test_gensym():
@@ -60,6 +75,12 @@ def test_parse_readback(text, _):
     validate(term)
     actual = readback(term)
     assert actual == expected
+
+    # Check for memory leaks.
+    collect("out", term)
+    del term
+    counts = get_term_stats()
+    assert not counts, counts
 
 
 REDUCE_EXAMPLES = [

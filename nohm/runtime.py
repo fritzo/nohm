@@ -23,7 +23,10 @@ class Term:
 
     def __init__(self):
         super().__init__()
+        for port in self.ports:
+            setattr(self, port, None)  # initially unlinked
         self.level = 0
+        # TODO add a safe tag as in Asperti98
 
     @classmethod
     @property
@@ -328,15 +331,13 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
 
     if re_varname.match(token):
         name = token
-        assert name in env
-        # Add a FAN node for each occurrence.
-        # The final FAN is removed in _link_usage().
-        var = FAN()
+        assert name in env, name
+        # Add a FAN for each occurrence; the final FAN will later be removed.
+        fan = FAN()
         user_port, user = env[name]
-        link(var, "out", user_port, user)
-        unlink(var, "in2")
-        env[name] = "out", var
-        return "in1", var
+        link(fan, "out", user_port, user)
+        env[name] = "in1", fan  # save for later
+        return "in2", fan  # use now
 
     if token == "APP":
         lhs_port, lhs = _parse(tokens, env)
@@ -348,44 +349,39 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
 
     if token == "LAM":
         name = tokens.pop()
-        assert re_varname.match(name)
+        assert re_varname.match(name), name
         lam = LAM()
         env = env.copy()
         env[name] = "var", lam
         body_port, body = _parse(tokens, env)
         link(lam, "body", body_port, body)
         used_port, used = env[name]
-        if used is lam:
-            # Variable was never used.
-            assert used_port == "var"
+        if used is lam:  # Variable was never used.
+            assert used_port == "var", used_port
             unlink(lam, "var")
-        else:
-            # Variable was used at least once.
-            assert used_port == "out"
-            assert isinstance(used, FAN)
-            assert used.in2 is None
+        else:  # Variable was used at least once.
+            assert used_port == "in1", used_port
+            assert isinstance(used, FAN), type(used).__name__
+            assert used.in1 is None, used.in1
             # Eagerly eliminate the final FAN-_ pair.
-            user_port, user = safe(used.in1)
+            user_port, user = safe(used.in2)
             link(lam, "var", user_port, user)
             collect("out", used)
         return "out", lam
 
-    # LET is syntactic sugar on top of the term language.
-    if token == "LET":
+    if token == "LET":  # syntactic sugar
         name = tokens.pop()
         defn_port, defn = _parse(tokens, env)
         env = env.copy()
         env[name] = defn_port, defn
         body_port, body = _parse(tokens, env)
         used_port, used = env[name]
-        if used is defn:
-            # defn was never used.
+        if used is defn:  # defn was never used.
             collect(defn_port, defn)
-        else:
-            # Variable was used at least once.
-            assert used_port == "out"
-            assert isinstance(used, FAN)
-            assert used.in2 is None
+        else:  # Variable was used at least once.
+            assert used_port == "out", used_port
+            assert isinstance(used, FAN), type(used).__name__
+            assert used.in2 is None, used.in2
             # Eagerly eliminate the final FAN-_ pair.
             user_port, user = safe(used.in1)
             used_port, used = safe(used.out)
@@ -396,8 +392,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
             collect("in2", used)
         return body_port, body
 
-    # LETREC is syntactic sugar on top of the term language.
-    if token == "LETREC":
+    if token == "LETREC":  # syntactic sugar
         name = tokens.pop()
         fan = FAN()
         env = env.copy()
@@ -405,12 +400,10 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         body_port, body = _parse(tokens, env)
         used_port, used = env[name]
         assert isinstance(used, FAN)
-        if used is fan:
-            # Recursion was never used.
+        if used is fan:  # Recursion was never used.
             collect("out", fan)
             return body_port, body
-        else:
-            # Recursion was used at least once.
+        else:  # Recursion was used at least once.
             link(body, body_port, "out", fan)
             return "in2", fan
 
@@ -513,7 +506,7 @@ def validate(root):
     """
     Validates edges in the interaction net.
     """
-    terms = set()
+    terms = {root}
     pending = {root}
     while pending:
         source = pending.pop()
@@ -521,9 +514,9 @@ def validate(root):
             assert hasattr(source, source_port)
             d = getattr(source, source_port)
             if d is None:
-                if isinstance(d, LAM) and source_port in ("out", "var"):
+                if isinstance(source, LAM) and source_port == "var":
                     continue  # lambdas can have unused variables
-                elif d is root and source_port == "out":
+                elif source is root and source_port == "out":
                     continue  # the root node can have an empty out port
                 raise ValueError(f"Unlinked {type(source).__name__}.{source_port}")
             destin_port, destin = d
