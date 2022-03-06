@@ -23,7 +23,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install .[test]
-        pip freeze
+        python -m pip install .[test]
+        python -m mypy --install-types
+        python -m pip freeze
     - name: Run test
       run: make test

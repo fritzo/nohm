@@ -648,8 +648,8 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         if n == 0:
             link(("body", body), ("var", body))
             return "out", term
-        f: Tuple[str, Term] = "var", term
-        x: Tuple[str, Term] = "var", body
+        f: Tuple[str, Term] = ("var", term)
+        x: Tuple[str, Term] = ("var", body)
         for _ in range(n - 1):
             f, f_temp = MUX12()(f)
             x = APP()(f_temp, x)
