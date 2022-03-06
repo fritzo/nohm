@@ -28,11 +28,6 @@ class Term:
         self.level = 0
         # TODO add a safe tag as in Asperti98
 
-    @classmethod
-    @property
-    def principle_port(cls):
-        return cls.ports[0]
-
     def pop(self, port: str) -> "Port":
         assert port in self.ports
         result = getattr(self, port)
@@ -57,12 +52,12 @@ def safe(port: Port) -> Tuple[str, Term]:
 class MUX11(Term):  # Asperti's BOHM triangle
     """Level stepping."""
 
-    ports = "out", "in1"
-    out: Port
+    ports = "in1", "out"
     in1: Port
+    out: Port
 
 
-class MUX12(Term):  # aka fan aka delta
+class MUX12(Term):  # aka fan-out aka dup aka delta
     """Binary sharing."""
 
     ports = "in1", "out1", "out2"  # Similar to HVM's PAR,DP0,DP1
@@ -70,23 +65,38 @@ class MUX12(Term):  # aka fan aka delta
     out1: Port
     out2: Port
 
+    def __call__(self, *args: Port) -> Tuple[Port, Port]:
+        for port, arg in zip(self.ports, args):
+            setattr(self, port, arg)
+        return ("out1", self), ("out2", self)
 
-class MUX21(Term):  # aka fan aka delta
+
+class MUX21(Term):  # aka fan-in aka PAR aka delta
     """Binary sharing."""
 
-    ports = "out", "in1", "in2"  # Similar to HVM's PAR,DP0,DP1
-    out: Port
+    ports = "in1", "in2", "out"  # Similar to HVM's DP0,DP1,PAR
     in1: Port
     in2: Port
+    out: Port
+
+    def __call__(self, *args: Port) -> Port:
+        for port, arg in zip(self.ports, args):
+            setattr(self, port, arg)
+        return "out", self
 
 
 class LAM(Term):  # aka lambda aka abs
     """Lambda abstraction."""
 
-    ports = "out", "var", "body"
-    out: Port
+    ports = "var", "body", "out"
     var: Port
     body: Port
+    out: Port
+
+    def __call__(self, *args: Port) -> Port:
+        for port, arg in zip(self.ports, args):
+            setattr(self, port, arg)
+        return "out", self
 
 
 class APP(Term):  # aka apply
@@ -97,10 +107,38 @@ class APP(Term):  # aka apply
     rhs: Port
     out: Port
 
+    def __call__(self, *args: Port) -> Port:
+        for port, arg in zip(self.ports, args):
+            setattr(self, port, arg)
+        return "out", self
 
-def unlink(term: Term, port: str) -> None:
-    assert port in term.ports
-    setattr(term, port, None)
+
+class JOIN(Term):
+    """Nondeterministic binary choice."""
+
+    ports = "lhs", "rhs", "out"
+    lhs: Port
+    rhs: Port
+    out: Port
+
+    def __call__(self, *args: Port) -> Port:
+        for port, arg in zip(self.ports, args):
+            setattr(self, port, arg)
+        return "out", self
+
+
+class BOT(Term):
+    """Empty choice, i.e. divergent computation."""
+
+    ports = ("out",)
+    out: Port
+
+
+class TOP(Term):
+    """Error, i.e. join over all terms."""
+
+    ports = ("out",)
+    out: Port
 
 
 def link(lhs: Term, lhs_port: str, rhs_port: str, rhs: Term) -> None:
@@ -181,7 +219,20 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
 
         # Henceforth subterms are weak head normalized
         if isinstance(term, APP):
+            assert port == "out"
             lhs_port, lhs = safe(term.lhs)
+
+            # term = APP lhs rhs
+            # lhs = {BOT,TOP}
+            # ------------------ APP-BOT, APP-TOP
+            # term = lhs
+            if isinstance(lhs, (BOT, TOP)):
+                head_port, head = safe(term.pop("out"))
+                term.pop("lhs")
+                rhs_port, rhs = safe(term.pop("rhs"))
+                link(head, head_port, rhs_port, rhs)
+                collect("out", term)
+                continue
 
             # term = APP lhs rhs
             # lhs = LAM var body
@@ -190,7 +241,7 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
             # var = rhs
             if isinstance(lhs, LAM):
                 assert lhs_port == "out"
-                head_port, head = safe(term.pop(port))
+                head_port, head = safe(term.pop(port))  # FIXME requires a root
                 body_port, body = safe(lhs.pop("body"))
                 link(head, head_port, body_port, body)
                 if lhs.var is not None:
@@ -202,34 +253,110 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                 continue
 
             # term = APP lhs rhs
-            # lhs = MUX21 in1 in2
+            # lhs = MUX21 lhs1 lhs2
             # ---------------------- APP-MUX aka APP-PAR
             # term = MUX21 app1 app2
+            # rhs1, rhs2 = MUX12 rhs
+            # app1 = APP lhs1 rhs1
+            # app2 = APP lhs2 rhs2
+            if isinstance(lhs, MUX21):
+                assert lhs_port == "out"
+                head_ = term.pop("out")
+                rhs_ = term.pop("rhs")
+                lhs1_ = lhs.pop("in1")
+                lhs2_ = lhs.pop("in2")
+                rhs1_, rhs2_ = MUX12()(rhs_)
+                app1_ = APP()(lhs1_, rhs1_)
+                app2_ = APP()(lhs2_, rhs2_)
+                MUX21()(app1_, app2_, head_)
+                collect(port, term)
+                # FIXME Is this right? HVM doesn't push here.
+                stack.append((False,) + safe(app2_))
+                stack.append((False,) + safe(app1_))
+                continue
+
+            # term = APP lhs rhs
+            # lhs = JOIN lhs1 lhs2
+            # ---------------------- APP-JOIN
+            # term = JOIN app1 app2
             # rhs1, rhs2 = MUX21 rhs
             # app1 = APP in1 rhs1
             # app2 = APP in2 rhs2
-            if isinstance(lhs, MUX21) and lhs_port == "out":
-                head_port, head = getattr(term, port)
-                rhs_port, rhs = safe(term.pop("rhs"))
-                in1_port, in1 = safe(lhs.pop("in1"))
-                in2_port, in2 = safe(lhs.pop("in2"))
-                collect(port, term)
-                term = MUX21()
-                rhs_mux = MUX21()
-                app1 = APP()
-                app2 = APP()
-                link(rhs_mux, "out", rhs_port, rhs)
-                link(app1, "lhs", in1_port, in1)
-                link(app1, "rhs", "in1", rhs_mux)
-                link(app2, "lhs", in2_port, in2)
-                link(app2, "rhs", "in2", rhs_mux)
-                link(term, "in1", "out", app1)
-                link(term, "in2", "out", app2)
-                link(head, head_port, "out", term)
-                # FIXME Is this right? HVM doesn't push here.
-                stack.append((False, "out", app2))
-                stack.append((False, "out", app1))
+            if isinstance(lhs, JOIN):
+                assert lhs_port == "out"
+                raise NotImplementedError("TODO")
+
+        # Henceforth subterms are weak head normalized
+        if isinstance(term, JOIN):
+            assert port == "out"
+            lhs_port, lhs = safe(term.lhs)
+            rhs_port, rhs = safe(term.rhs)
+
+            # term = JOIN lhs rhs
+            # lhs = TOP
+            # ------------------ JOIN-LHS-TOP
+            # term = TOP
+            if isinstance(lhs, TOP):
+                head_port, head = safe(term.pop("out"))
+                top_port, top = safe(term.pop("lhs"))
+                link(head, head_port, top_port, top)
+                collect("out", term)
                 continue
+
+            # term = JOIN lhs rhs
+            # rhs = TOP
+            # ------------------ JOIN-RHS-TOP
+            # term = TOP
+            if isinstance(rhs, TOP):
+                head_port, head = safe(term.pop("out"))
+                top_port, top = safe(term.pop("rhs"))
+                link(head, head_port, top_port, top)
+                collect("out", term)
+                continue
+
+            # term = JOIN lhs rhs
+            # lhs = BOT
+            # ------------------ JOIN-LHS-BOT
+            # term = rhs
+            if isinstance(lhs, BOT):
+                head_port, head = safe(term.pop("out"))
+                term.pop("rhs")
+                collect("out", term)
+                link(head, head_port, rhs_port, rhs)
+                continue
+
+            # term = JOIN lhs rhs
+            # rhs = BOT
+            # ------------------ JOIN-RHS-BOT
+            # term = lhs
+            if isinstance(rhs, BOT):
+                head_port, head = safe(term.pop("out"))
+                term.pop("lhs")
+                collect("out", term)
+                link(head, head_port, lhs_port, lhs)
+                continue
+
+            # term = JOIN lhs rhs
+            # lhs = MUX21 lhs1 lhs2
+            # ---------------------- JOIN-LHS-MUX
+            # term = MUX21 app1 app2
+            # rhs1, rhs2 = MUX12 rhs
+            # app1 = APP lhs1 rhs1
+            # app2 = APP lhs2 rhs2
+            if isinstance(lhs, MUX21):
+                assert lhs_port == "out"
+                raise NotImplementedError("TODO")
+
+            # term = JOIN lhs rhs
+            # rhs = MUX21 rhs1 rhs2
+            # ---------------------- JOIN-RHS-MUX
+            # term = MUX21 app1 app2
+            # lhs1, lhs2 = MUX21 lhs
+            # app1 = APP lhs1 lhs1
+            # app2 = APP lhs2 lhs2
+            if isinstance(rhs, MUX21):
+                assert rhs_port == "out"
+                raise NotImplementedError("TODO")
 
         if isinstance(term, MUX12):
             if port != "out":
@@ -330,7 +457,7 @@ def parse(text: str) -> Tuple[str, Term]:
     tokens.reverse()
     env: Env = {}
     port, term = _parse(tokens, env)
-    unlink(term, port)
+    term.pop(port)
     if DEBUG:
         validate(term)
     assert not tokens, f"Extra input: {' '.join(tokens)}"
@@ -350,13 +477,17 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         env[name] = "out1", mux  # save for later
         return "out2", mux  # use now
 
-    if token == "APP":
+    if token in ("APP", "JOIN"):
         lhs_port, lhs = _parse(tokens, env)
         rhs_port, rhs = _parse(tokens, env)
-        app = APP()
-        link(app, "lhs", lhs_port, lhs)
-        link(app, "rhs", rhs_port, rhs)
-        return "out", app
+        term = {"APP": APP, "JOIN": JOIN}[token]()
+        link(term, "lhs", lhs_port, lhs)
+        link(term, "rhs", rhs_port, rhs)
+        return "out", term
+
+    if token in ("BOT", "TOP"):
+        term = {"BOT": BOT, "TOP": TOP}[token]()
+        return "out", term
 
     if token == "LAM":
         name = tokens.pop()
@@ -369,7 +500,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         used_port, used = env[name]
         if used is lam:  # Variable was never used.
             assert used_port == "var", used_port
-            unlink(lam, "var")
+            lam.pop("var")
         else:  # Variable was used at least once.
             assert used_port == "out1", used_port
             assert isinstance(used, MUX12), type(used).__name__
@@ -422,10 +553,10 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         n = int(token)
         term = LAM()
         body = LAM()
-        unlink(term, "out")
+        term.pop("out")
         link(term, "body", "out", body)
         if n == 0:
-            unlink(term, "var")
+            term.pop("var")
             link(body, "body", "var", body)
             return "out", term
         f_port = "var"
@@ -437,7 +568,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
             mux = MUX12()
             link(mux, "in1", f_port, f)
             link(app, "lhs", "out1", mux)
-            unlink(mux, "out2")
+            mux.pop("out2")
             f_port, f = "out2", mux
             x_port, x = "out", app
         app = APP()
@@ -455,8 +586,6 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
 
 def readback(port: str, term: Term) -> str:
     env: Dict[Term, str] = {}
-    if not isinstance(term, (LAM, APP)):
-        raise NotImplementedError(f"Unsupported term: {type(term).__name__}")
     tokens = _readback(port, term, env)
     tokens.reverse()
     return " ".join(tokens)
@@ -481,10 +610,13 @@ def _readback(port: str, term: Term, env: Dict[Term, str]) -> List[str]:
             name = env[term]
             return [name]
 
-    if isinstance(term, APP):
+    if isinstance(term, (APP, JOIN)):
         lhs = _readback(*safe(term.lhs), env)
         rhs = _readback(*safe(term.rhs), env)
-        return rhs + lhs + ["APP"]
+        return rhs + lhs + [type(term).__name__]
+
+    if isinstance(term, (BOT, TOP)):
+        return [type(term).__name__]
 
     raise NotImplementedError(f"Unsupported term: {type(term).__name__}")
 
