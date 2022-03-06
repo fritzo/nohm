@@ -127,6 +127,7 @@ class JOIN(Term):
         return "out", self
 
 
+# TODO unbox atoms BOT and TOP.
 class BOT(Term):
     """Empty choice, i.e. divergent computation."""
 
@@ -189,11 +190,21 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
     Reduces a term to weak head normal form.
     See Asperti98a Figure 2.22 for sharing graph reduction rules.
     """
+    # This finds beta redexes (APP-LAM pairs) by bubble sorting wrt the partial
+    # order MUX21 = JOIN > APP > LAM > MUX12, including rules:
+    #   APP(MUX21) -> MUX21(APP)
+    #   APP(JOIN) -> JOIN(APP)
+    #   MUX12(MUX21) -> wire or MUX21(MUX12)
+    #   MUX12(JOIN) -> JOIN(MUX12)
+    #   MUX12(LAM) -> LAM(MUX12)
+    # We add other affine rules to aid simplification.
+    #   MUX11(MUX?) -> MUX?
+    #   MUX?(MUX11) -> MUX?
+    #   JOIN(TOP) -> TOP
+    #   JOIN(BOT,x) -> x
     # Note that when porting this to C, the C code should recycle terms
     # to reduce malloc overhead. See collect() calls in this function.
     # TODO handle levels in rules.
-    # TODO add remaining rules.
-    # TODO decide between weak-head or full normalization.
     # TODO check for stack self-collision and convert to BOT.
 
     is_normal = False  # similar to HVM runtime's init
@@ -336,28 +347,6 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                 link(head, head_port, lhs_port, lhs)
                 continue
 
-            # term = JOIN lhs rhs
-            # lhs = MUX21 lhs1 lhs2
-            # ---------------------- JOIN-LHS-MUX
-            # term = MUX21 app1 app2
-            # rhs1, rhs2 = MUX12 rhs
-            # app1 = APP lhs1 rhs1
-            # app2 = APP lhs2 rhs2
-            if isinstance(lhs, MUX21):
-                assert lhs_port == "out"
-                raise NotImplementedError("TODO")
-
-            # term = JOIN lhs rhs
-            # rhs = MUX21 rhs1 rhs2
-            # ---------------------- JOIN-RHS-MUX
-            # term = MUX21 app1 app2
-            # lhs1, lhs2 = MUX21 lhs
-            # app1 = APP lhs1 lhs1
-            # app2 = APP lhs2 lhs2
-            if isinstance(rhs, MUX21):
-                assert rhs_port == "out"
-                raise NotImplementedError("TODO")
-
         if isinstance(term, MUX12):
             if port != "out":
                 x_port, x = safe(term.in1)
@@ -401,6 +390,35 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
 
                     collect(port, term)
                     collect(x_port, x)
+                    continue
+
+                # out1, out2 = MUX12 x
+                # x = JOIN lhs, rhs
+                # ------------------------- MUX-JOIN
+                # out1 = JOIN lhs1 rhs1
+                # out2 = JOIN lhs2 rhs2
+                # lhs1, lhs2 = MUX12 lhs
+                # rhs1, rhs2 = MUX12 rhs
+                if isinstance(x, LAM):
+                    assert x_port == "out"
+                    out1_port, out1 = safe(term.pop("out1"))
+                    out2_port, out2 = safe(term.pop("out2"))
+                    lhs_port, lhs = safe(x.pop("lhs"))
+                    rhs_port, rhs = safe(x.pop("rhs"))
+                    collect(port, term)
+                    collect(x_port, x)
+                    lhs_mux = MUX21()
+                    rhs_mux = MUX12()
+                    join1 = JOIN()
+                    join2 = JOIN()
+                    link(lhs_mux, "in1", lhs_port, lhs)
+                    link(rhs_mux, "out", rhs_port, rhs)
+                    link(join1, "lhs", "out1", lhs_mux)
+                    link(join1, "rhs", "in1", rhs_mux)
+                    link(join2, "lhs", "out2", lhs_mux)
+                    link(join2, "rhs", "in2", rhs_mux)
+                    link(out1, out1_port, "out", join1)
+                    link(out2, out2_port, "out", join2)
                     continue
 
                 # out1, out2 = MUX12 x
