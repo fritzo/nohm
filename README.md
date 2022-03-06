@@ -4,16 +4,17 @@
 # NOHM: Nondeterministic Optimal Higher-order Machine
 
 This is a research implementation of optimal beta reduction
-([Asperti98a](#Asperti98a)), combining implementation ideas of BOHM
-([Asperti98b](#Asperti98b)) with engineering tricks of HVM
+([Asperti98a](#Asperti98a)), combining implementation ideas of
+[BOHM](https://github.com/asperti/BOHM1.1) ([Asperti98b](#Asperti98b)) with
+engineering tricks of [HVM](https://github.com/Kindelia/HVM)
 ([Taelin22](#Taelin22)).
 
 The target language is pure untyped nondeterministic &lambda;-calculus
-([Barendregt84](#Barendregt84),[Hindley08](#Hindley08)), that is the language with function abstraction,
+([Barendregt84](#Barendregt84)), that is the language with function abstraction,
 function application, bound variables, and nondeterministic parallel binary
 choice.
-The NOHM aims to implement types as closures ([Scott76](#Scott76)) (increasing
-idempotent functions) together with a rich type system of closures
+This machine aims to implement types as closures ([Scott76](#Scott76))
+(increasing idempotent functions) together with a rich type system of closures
 ([Obermeyer09](#Obermeyer09)).
 It remains to be seen whether this is feasible.
 
@@ -29,7 +30,7 @@ This architecture allows unit tests to be written in Python.
     <dd>
     Andrea Asperti, Stefano Guerrini (1998)
     "The optimal implementation of functional programming languages"
-    (<a href="https://books.google.com/books?id=Bod5HbPh-WwC">book</a>)
+    (<a href="https://doi.org/10.1145/505863.505887">doi</a>)
     </dd>
 <dt> Asperti98b <a name="Asperti98b" /> </dt>
     <dd>
@@ -41,18 +42,13 @@ This architecture allows unit tests to be written in Python.
     <dd>
     Hendrik Barendregt (1984)
     "The lambda calculus: its syntax and semantics"
-    (<a href="https://books.google.com/books?id=eMtTAAAAYAAJ">book</a>)
-<dt> Hindley08 <a name="Hindley08" /> </dt>
-    <dd>
-    J. Roger Hindley, J.P. Seldin (2008)
-    "Lambda calculus and combinatory logic: an introduction"
-    </dd>
 <dt> Obermeyer09 <a name="Obermeyer09" /> </dt>
     <dd>
     Fritz Obermeyer (2009)
     "Automated equational reasoning in nondeterministic &lambda;-calculi modulo theories H*"
-    (<a href="http://fritzo.org/thesis.pdf">thesis</a> |
-    <a href="https://github.com/fritzo/pomagma">code</a>)
+    (<a href="http://fritzo.org/thesis.pdf">pdf</a> |
+    <a href="https://github.com/fritzo/johann">old code</a> |
+    <a href="https://github.com/fritzo/pomagma">new code</a>)
     </dd>
 <dt> Salikhmetov17 <a name="Salikhmetov17" /> </dt>
     <dd>
@@ -65,7 +61,8 @@ This architecture allows unit tests to be written in Python.
     <dd>
     Dana Scott (1976)
     "Datatypes as Lattices"
-    (<a href="http://www.cs.ox.ac.uk/files/3287/PRG05.pdf">paper</a>)
+    (<a href="https://doi.org/10.1137/0205037">doi</a> |
+     <a href="http://www.cs.ox.ac.uk/files/3287/PRG05.pdf">pdf</a>)
     </dd>
 <dt> Taelin22 <a name="Taelin22" /> </dt>
     <dd>
