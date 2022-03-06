@@ -225,8 +225,6 @@ def reduce(main: MAIN) -> None:
     #   MUX12(BOT) -> BOT  # Does this need to be safe-guarded?
     #   APP(TOP,x) -> TOP
     #   APP(BOT,x) -> BOT
-    #   LAM(x,TOP) -> TOP
-    #   LAM(x,BOT) -> BOT
     # We additionally implement rules merging MUX11 into any other mux.
     # Note that when porting this to C, the C code should recycle terms
     # to reduce malloc overhead. See collect() calls in this function.
@@ -261,19 +259,6 @@ def reduce(main: MAIN) -> None:
             continue
 
         # Henceforth subterms are weak head normalized
-        if isinstance(term, LAM):
-            assert port == "out"
-            body_port, body = safe(term.body)
-
-            # term = LAM var body
-            # body = {BOT,TOP}
-            # ------------------ LAM-BOT, LAM-TOP (eta conversion)
-            # term = body
-            if isinstance(body, (BOT, TOP)):
-                link(term.pop("out"), term.pop("body"))
-                collect(term)
-                continue
-
         if isinstance(term, APP):
             assert port == "out"
             lhs_port, lhs = safe(term.lhs)
@@ -294,6 +279,7 @@ def reduce(main: MAIN) -> None:
             # var = rhs
             if isinstance(lhs, LAM):
                 assert lhs_port == "out"
+                body_port, body = safe(lhs.body)
                 link(term.pop(port), lhs.pop("body"))
                 if lhs.var is not None:
                     link(lhs.pop("var"), term.pop("rhs"))
@@ -523,7 +509,7 @@ def reduce(main: MAIN) -> None:
 
 
 re_varname = re.compile("[a-z_][a-z0-9_]*$")
-re_int = re.compile("[0-9]+$")
+re_numeral = re.compile("[0-9]+$")
 Env = Dict[str, Tuple[str, Term]]
 
 
@@ -573,7 +559,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         assert re_varname.match(name), name
         lam = LAM()
 
-        # Parse in an extended environment.
+        # Parse in an modified environment.
         old = env.get(name)
         env[name] = "var", lam
         link(("body", lam), _parse(tokens, env))
@@ -597,34 +583,39 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
 
     if token == "LET":  # syntactic sugar
         name = tokens.pop()
+        assert re_varname.match(name), name
         defn_port, defn = _parse(tokens, env)
 
-        # Parse in an extended environment.
+        # Parse in an modified environment.
         old = env.get(name)
         env[name] = defn_port, defn
-        body_port, body = _parse(tokens, env)
+        result = _parse(tokens, env)
         var_port, var = env.pop(name)
         if old is not None:
             env[name] = old
 
-        if var is defn:  # defn was never used.
+        if var is defn:  # Definition was never used.
             collect(defn)
-        else:  # Variable was used at least once.
+        else:  # Definition was used at least once.
             assert isinstance(var, MUX12), type(var).__name__
             assert var_port == "out1", var_port
             assert var.in1 is not None
             assert var.out1 is None, var.out1
-            assert var.out2 is not None
             # Eagerly eliminate the final mux.
-            link(var.pop("in1"), var.pop("out2"))
+            if var.out2 is None:
+                assert result == ("out2", var)
+                result = safe(var.pop("in1"))
+            else:
+                link(var.pop("in1"), var.pop("out2"))
             collect(var)
-        return body_port, body
+        return result
 
     if token == "LETREC":  # syntactic sugar
         name = tokens.pop()
+        assert re_varname.match(name), name
         mux = MUX12()
 
-        # Parse in an extended environment.
+        # Parse in an modified environment.
         old = env.get(name)
         env[name] = "out1", mux
         body_port, body = _parse(tokens, env)
@@ -648,8 +639,8 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         env[name] = out1  # save for later
         return out2  # use now
 
-    # Create a Church numeral.
-    if re_int.match(token):
+    if re_numeral.match(token):
+        # Create a Church numeral.
         n = int(token)
         term = LAM()
         body = LAM()
@@ -657,19 +648,12 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         if n == 0:
             link(("body", body), ("var", body))
             return "out", term
-        f_port = "var"
-        f: Term = term
-        x_port = "var"
-        x: Term = body
+        f: Tuple[str, Term] = "var", term
+        x: Tuple[str, Term] = "var", body
         for _ in range(n - 1):
-            app = APP()
-            mux = MUX12()
-            link(("in1", mux), (f_port, f))
-            link(("lhs", app), ("out1", mux))
-            mux.pop("out2")
-            f_port, f = "out2", mux
-            x_port, x = "out", app
-        APP()((f_port, f), (x_port, x), ("body", body))
+            f, f_temp = MUX12()(f)
+            x = APP()(f_temp, x)
+        APP()(f, x, ("body", body))
         return "out", term
 
     raise ValueError(f"Unhandled token: {token}")
