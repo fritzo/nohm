@@ -52,6 +52,8 @@ PARSE_EXAMPLES = [
     ("BOT", "BOT"),
     ("TOP", "TOP"),
     ("APP BOT TOP", "APP BOT TOP"),
+    ("LAM a BOT", "LAM a BOT"),
+    ("LAM a TOP", "LAM a TOP"),
     ("LAM a a", "LAM a a"),
     ("LAM a LAM b a", "LAM a LAM b a"),
     ("LAM a LAM b b", "LAM a LAM b b"),
@@ -59,14 +61,9 @@ PARSE_EXAMPLES = [
     ("LAM a LAM b APP a b", "LAM a LAM b APP a b"),
     ("LAM a LAM b JOIN a b", "LAM a LAM b JOIN a b"),
     ("APP LAM a a LAM a a", "APP LAM a a LAM b b"),
-    (
-        """
-        LET one LAM f x APP f x
-        LET two LAM f x APP f APP x x
-        APP APP two two one
-        """,
-        "LAM a a",
-    ),
+    ("LET one LAM x x one", "LAM a a"),
+    ("LET one LAM x x LET zero LAM f LAM x x one", "LAM a a"),
+    ("LET zero LAM f LAM x x LET one LAM x x one", "LAM a a"),
     ("0", "LAM f LAM x x"),
     ("1", "LAM f LAM x APP f x"),
     ("2", "LAM f LAM x APP f APP f x"),

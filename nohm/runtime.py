@@ -7,7 +7,6 @@ DEBUG = int(os.environ.get("NOHM_DEBUG", 0))
 
 ################################################################################
 # Terms
-# TODO add JOIN, TOP, BOT for nondeterminism.
 # TODO add TYPE, SEC, RET for types as closures.
 
 
@@ -56,9 +55,9 @@ class MUX11(Term):  # Asperti's BOHM triangle
     in1: Port
     out: Port
 
-    def __call__(self, *args: Port) -> Port:
+    def __call__(self, *args: Port) -> Tuple[str, Term]:
         for port, arg in zip(self.ports, args):
-            setattr(self, port, arg)
+            link((port, self), arg)
         return "out", self
 
 
@@ -70,9 +69,9 @@ class MUX12(Term):  # aka fan-out aka dup aka delta
     out1: Port
     out2: Port
 
-    def __call__(self, *args: Port) -> Tuple[Port, Port]:
+    def __call__(self, *args: Port) -> Tuple[Tuple[str, Term], Tuple[str, Term]]:
         for port, arg in zip(self.ports, args):
-            setattr(self, port, arg)
+            link((port, self), arg)
         return ("out1", self), ("out2", self)
 
 
@@ -84,9 +83,9 @@ class MUX21(Term):  # aka fan-in aka PAR aka delta
     in2: Port
     out: Port
 
-    def __call__(self, *args: Port) -> Port:
+    def __call__(self, *args: Port) -> Tuple[str, Term]:
         for port, arg in zip(self.ports, args):
-            setattr(self, port, arg)
+            link((port, self), arg)
         return "out", self
 
 
@@ -98,10 +97,10 @@ class LAM(Term):  # aka lambda aka abs
     body: Port
     out: Port
 
-    def __call__(self, *args: Port) -> Port:
+    def __call__(self, *args: Port) -> Tuple[Tuple[str, Term], Tuple[str, Term]]:
         for port, arg in zip(self.ports, args):
-            setattr(self, port, arg)
-        return "out", self
+            link((port, self), arg)
+        return ("var", self), ("out", self)
 
 
 class APP(Term):  # aka apply
@@ -112,9 +111,9 @@ class APP(Term):  # aka apply
     rhs: Port
     out: Port
 
-    def __call__(self, *args: Port) -> Port:
+    def __call__(self, *args: Port) -> Tuple[str, Term]:
         for port, arg in zip(self.ports, args):
-            setattr(self, port, arg)
+            link((port, self), arg)
         return "out", self
 
 
@@ -126,9 +125,9 @@ class JOIN(Term):
     rhs: Port
     out: Port
 
-    def __call__(self, *args: Port) -> Port:
+    def __call__(self, *args: Port) -> Tuple[str, Term]:
         for port, arg in zip(self.ports, args):
-            setattr(self, port, arg)
+            link((port, self), arg)
         return "out", self
 
 
@@ -154,14 +153,18 @@ class MAIN(Term):
     in1: Port
 
 
-def link(lhs: Term, lhs_port: str, rhs_port: str, rhs: Term) -> None:
+def link(end1: Port, end2: Port) -> None:
     """
-    Create a bidirectional edge between a pair of ports on a pair of terms.
+    Create a bidirectional edge between two ends.
     """
-    assert lhs_port in lhs.ports
-    assert rhs_port in rhs.ports
-    setattr(lhs, lhs_port, (rhs_port, rhs))
-    setattr(rhs, rhs_port, (lhs_port, lhs))
+    if end1 is not None:
+        port, term = end1
+        assert port in term.ports
+        setattr(term, port, end2)
+    if end2 is not None:
+        port, term = end2
+        assert port in term.ports
+        setattr(term, port, end1)
 
 
 ################################################################################
@@ -172,7 +175,7 @@ def collect(term: Term) -> None:
     """
     Recursively garbage collects a term. See Asperti98a Figure 12.13 for rules.
     """
-    # FIXME thee MUX rules need to check for safe fans. See Asperti98a.
+    # FIXME these MUX rules need to check for safe fans. See Asperti98a.
     if isinstance(term, MUX21) and term.out is not None:
         assert term.in1 is None or term.in2 is None
         if term.in1 is not None:
@@ -265,9 +268,7 @@ def reduce(main: MAIN) -> None:
             # ------------------ LAM-BOT, LAM-TOP (eta conversion)
             # term = body
             if isinstance(body, (BOT, TOP)):
-                head_port, head = safe(term.pop("out"))
-                term.pop("body")
-                link(head, head_port, body_port, body)
+                link(term.pop("out"), term.pop("body"))
                 collect(term)
                 continue
 
@@ -280,9 +281,7 @@ def reduce(main: MAIN) -> None:
             # ------------------ APP-BOT, APP-TOP
             # term = lhs
             if isinstance(lhs, (BOT, TOP)):
-                head_port, head = safe(term.pop("out"))
-                term.pop("lhs")
-                link(head, head_port, lhs_port, lhs)
+                link(term.pop("out"), term.pop("lhs"))
                 collect(term)
                 continue
 
@@ -293,13 +292,9 @@ def reduce(main: MAIN) -> None:
             # var = rhs
             if isinstance(lhs, LAM):
                 assert lhs_port == "out"
-                head_port, head = safe(term.pop(port))
-                body_port, body = safe(lhs.pop("body"))
-                link(head, head_port, body_port, body)
+                link(term.pop(port), lhs.pop("body"))
                 if lhs.var is not None:
-                    var_port, var = safe(lhs.pop("var"))
-                    rhs_port, rhs = safe(term.pop("rhs"))
-                    link(rhs, rhs_port, var_port, var)
+                    link(lhs.pop("var"), term.pop("rhs"))
                 collect(term)
                 stack.append((False, body_port, body))
                 continue
@@ -313,18 +308,14 @@ def reduce(main: MAIN) -> None:
             # app2 = APP lhs2 rhs2
             if isinstance(lhs, MUX21):
                 assert lhs_port == "out"
-                head_ = term.pop("out")
-                rhs_ = term.pop("rhs")
-                lhs1_ = lhs.pop("in1")
-                lhs2_ = lhs.pop("in2")
-                rhs1_, rhs2_ = MUX12()(rhs_)
-                app1_ = APP()(lhs1_, rhs1_)
-                app2_ = APP()(lhs2_, rhs2_)
-                MUX21()(app1_, app2_, head_)
+                rhs1, rhs2 = MUX12()(term.pop("rhs"))
+                app1 = APP()(lhs.pop("in1"), rhs1)
+                app2 = APP()(lhs.pop("in2"), rhs2)
+                MUX21()(app1, app2, term.pop("out"))
                 collect(term)
                 # FIXME Is this right? HVM doesn't push here.
-                stack.append((False,) + safe(app2_))
-                stack.append((False,) + safe(app1_))
+                stack.append((False,) + safe(app2))
+                stack.append((False,) + safe(app1))
                 continue
 
             # term = APP lhs rhs
@@ -349,9 +340,7 @@ def reduce(main: MAIN) -> None:
             # ------------------ JOIN-LHS-TOP
             # term = TOP
             if isinstance(lhs, TOP):
-                head_port, head = safe(term.pop("out"))
-                top_port, top = safe(term.pop("lhs"))
-                link(head, head_port, top_port, top)
+                link(term.pop("out"), term.pop("lhs"))
                 collect(term)
                 continue
 
@@ -360,9 +349,7 @@ def reduce(main: MAIN) -> None:
             # ------------------ JOIN-RHS-TOP
             # term = TOP
             if isinstance(rhs, TOP):
-                head_port, head = safe(term.pop("out"))
-                top_port, top = safe(term.pop("rhs"))
-                link(head, head_port, top_port, top)
+                link(term.pop("out"), term.pop("rhs"))
                 collect(term)
                 continue
 
@@ -371,10 +358,8 @@ def reduce(main: MAIN) -> None:
             # ------------------ JOIN-LHS-BOT
             # term = rhs
             if isinstance(lhs, BOT):
-                head_port, head = safe(term.pop("out"))
-                term.pop("rhs")
+                link(term.pop("out"), term.pop("rhs"))
                 collect(term)
-                link(head, head_port, rhs_port, rhs)
                 continue
 
             # term = JOIN lhs rhs
@@ -382,10 +367,8 @@ def reduce(main: MAIN) -> None:
             # ------------------ JOIN-RHS-BOT
             # term = lhs
             if isinstance(rhs, BOT):
-                head_port, head = safe(term.pop("out"))
-                term.pop("lhs")
+                link(term.pop("out"), term.pop("lhs"))
                 collect(term)
-                link(head, head_port, lhs_port, lhs)
                 continue
 
         if isinstance(term, MUX12):
@@ -394,10 +377,6 @@ def reduce(main: MAIN) -> None:
 
                 if isinstance(x, MUX21):
                     assert x_port == "out"
-                    out1_port, out1 = safe(term.pop("out1"))
-                    out2_port, out2 = safe(term.pop("out2"))
-                    in1_port, in1 = safe(x.pop("in1"))
-                    in2_port, in2 = safe(x.pop("in2"))
 
                     # out1, out2 = MUX12 x
                     # x = MUX21 in1 in2
@@ -405,8 +384,10 @@ def reduce(main: MAIN) -> None:
                     # out1 = in1
                     # out2 = in2
                     if term.level == x.level:
-                        link(in1, in1_port, out1_port, out1)
-                        link(in2, in2_port, out2_port, out2)
+                        link(x.pop("in1"), term.pop("out1"))
+                        link(x.pop("in2"), term.pop("out2"))
+                        collect(term)
+                        continue
 
                     # out1, out2 = MUX12 x
                     # x = MUX21 in1 in2
@@ -415,20 +396,10 @@ def reduce(main: MAIN) -> None:
                     # out2 = MUX21 x21 x22
                     # x11, x21 = MUX12 in1
                     # x12, x22 = MUX12 in2
-                    else:
-                        mux1 = MUX21()
-                        mux2 = MUX21()
-                        mux3 = MUX12()
-                        mux4 = MUX12()
-                        link(out1, out1_port, "out", mux1)
-                        link(out2, out2_port, "out", mux2)
-                        link(mux1, "in1", "out1", mux3)
-                        link(mux1, "in2", "out1", mux4)
-                        link(mux2, "in1", "out2", mux3)
-                        link(mux2, "in2", "out2", mux4)
-                        link(mux3, "in1", in1_port, in1)
-                        link(mux4, "in1", in2_port, in2)
-
+                    x11, x21 = MUX12()(x.pop("in1"))
+                    x12, x22 = MUX12()(x.pop("in2"))
+                    MUX21()(x11, x12, term.pop("out1"))
+                    MUX21()(x21, x22, term.pop("out2"))
                     collect(term)
                     continue
 
@@ -441,24 +412,11 @@ def reduce(main: MAIN) -> None:
                 # rhs1, rhs2 = MUX12 rhs
                 if isinstance(x, LAM):
                     assert x_port == "out"
-                    out1_port, out1 = safe(term.pop("out1"))
-                    out2_port, out2 = safe(term.pop("out2"))
-                    lhs_port, lhs = safe(x.pop("lhs"))
-                    rhs_port, rhs = safe(x.pop("rhs"))
+                    lhs1, lhs2 = MUX12()(x.pop("lhs"))
+                    rhs1, rhs2 = MUX12()(x.pop("rhs"))
+                    JOIN()(lhs1, rhs1, term.pop("out1"))
+                    JOIN()(lhs2, rhs2, term.pop("out2"))
                     collect(term)
-                    collect(x)
-                    lhs_mux = MUX21()
-                    rhs_mux = MUX12()
-                    join1 = JOIN()
-                    join2 = JOIN()
-                    link(lhs_mux, "in1", lhs_port, lhs)
-                    link(rhs_mux, "out", rhs_port, rhs)
-                    link(join1, "lhs", "out1", lhs_mux)
-                    link(join1, "rhs", "in1", rhs_mux)
-                    link(join2, "lhs", "out2", lhs_mux)
-                    link(join2, "rhs", "in2", rhs_mux)
-                    link(out1, out1_port, "out", join1)
-                    link(out2, out2_port, "out", join2)
                     continue
 
                 # out1, out2 = MUX12 x
@@ -470,24 +428,11 @@ def reduce(main: MAIN) -> None:
                 # body1, body2 = MUX12 body
                 if isinstance(x, LAM):
                     assert x_port == "out"
-                    out1_port, out1 = safe(term.pop("out1"))
-                    out2_port, out2 = safe(term.pop("out2"))
-                    var_port, var = safe(x.pop("var"))
-                    body_port, body = safe(x.pop("body"))
+                    body1, body2 = MUX12()(x.pop("body"))
+                    var1, out1 = LAM()(None, body1, term.pop("out1"))
+                    var2, out2 = LAM()(None, body2, term.pop("out2"))
+                    MUX21()(var1, var2, x.pop("var"))
                     collect(term)
-                    collect(x)
-                    var_mux = MUX21()
-                    body_mux = MUX12()
-                    lam1 = LAM()
-                    lam2 = LAM()
-                    link(var_mux, "in1", var_port, var)
-                    link(body_mux, "out", body_port, body)
-                    link(lam1, "var", "out1", var_mux)
-                    link(lam1, "body", "in1", body_mux)
-                    link(lam2, "var", "out2", var_mux)
-                    link(lam2, "body", "in2", body_mux)
-                    link(out1, out1_port, "out", lam1)
-                    link(out2, out2_port, "out", lam2)
                     continue
 
 
@@ -516,7 +461,7 @@ def parse(text: str) -> MAIN:
     assert not tokens, f"Extra input: {' '.join(tokens)}"
 
     main = MAIN()
-    link(main, "in1", port, term)
+    link(("in1", main), (port, term))
     if DEBUG:
         validate(main)
     return main
@@ -525,17 +470,21 @@ def parse(text: str) -> MAIN:
 def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
     token = tokens.pop()
 
-    if token in ("BOT", "TOP"):
-        term = {"BOT": BOT, "TOP": TOP}[token]()
-        return "out", term
+    if token == "BOT":
+        return "out", BOT()
 
-    if token in ("APP", "JOIN"):
-        lhs_port, lhs = _parse(tokens, env)
-        rhs_port, rhs = _parse(tokens, env)
-        term = {"APP": APP, "JOIN": JOIN}[token]()
-        link(term, "lhs", lhs_port, lhs)
-        link(term, "rhs", rhs_port, rhs)
-        return "out", term
+    if token == "TOP":
+        return "out", TOP()
+
+    if token == "JOIN":
+        lhs_ = _parse(tokens, env)
+        rhs_ = _parse(tokens, env)
+        return JOIN()(lhs_, rhs_)
+
+    if token == "APP":
+        lhs_ = _parse(tokens, env)
+        rhs_ = _parse(tokens, env)
+        return APP()(lhs_, rhs_)
 
     if token == "LAM":
         name = tokens.pop()
@@ -543,20 +492,20 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         lam = LAM()
         env = env.copy()
         env[name] = "var", lam
-        body_port, body = _parse(tokens, env)
-        link(lam, "body", body_port, body)
-        used_port, used = env[name]
-        if used is lam:  # Variable was never used.
-            assert used_port == "var", used_port
+        link(("body", lam), _parse(tokens, env))
+        var_port, var = env[name]
+        if var is lam:  # Variable was never used.
+            assert var_port == "var", var_port
             lam.pop("var")
         else:  # Variable was used at least once.
-            assert used_port == "out1", used_port
-            assert isinstance(used, MUX12), type(used).__name__
-            assert used.out1 is None, used.out1
+            assert isinstance(var, MUX12), type(var).__name__
+            assert var_port == "out1", var_port
+            assert var.in1 is not None
+            assert var.out1 is None, var.out1
+            assert var.out2 is not None
             # Eagerly eliminate the final mux.
-            user_port, user = safe(used.out2)
-            link(lam, "var", user_port, user)
-            collect(used)
+            link(var.pop("in1"), var.pop("out2"))
+            collect(var)
         return "out", lam
 
     if token == "LET":  # syntactic sugar
@@ -565,20 +514,16 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         env = env.copy()
         env[name] = defn_port, defn
         body_port, body = _parse(tokens, env)
-        used_port, used = env[name]
-        if used is defn:  # defn was never used.
+        var_port, var = env[name]
+        if var is defn:  # defn was never used.
             collect(defn)
         else:  # Variable was used at least once.
-            assert used_port == "out", used_port
-            assert isinstance(used, MUX12), type(used).__name__
-            assert used.out2 is None, used.out2
+            assert var_port == "out", var_port
+            assert isinstance(var, MUX12), type(var).__name__
+            assert var.out2 is None, var.out2
             # Eagerly eliminate the final mux.
-            user_port, user = safe(used.out1)
-            used_port, used = safe(used.in1)
-            link(used, used_port, user_port, user)
-            used.pop("out1")
-            used.pop("in1")
-            collect(used)
+            link(var.pop("in1"), var.pop("out1"))
+            collect(var)
         return body_port, body
 
     if token == "LETREC":  # syntactic sugar
@@ -587,13 +532,13 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         env = env.copy()
         env[name] = "out1", mux
         body_port, body = _parse(tokens, env)
-        used_port, used = env[name]
-        assert isinstance(used, MUX12)
-        if used is mux:  # Recursion was never used.
+        var_port, var = env[name]
+        assert isinstance(var, MUX12)
+        if var is mux:  # Recursion was never used.
             collect(mux)
             return body_port, body
         else:  # Recursion was used at least once.
-            link(body, body_port, "in1", mux)
+            link((body_port, body), ("in1", mux))
             return "out2", mux
 
     if re_varname.match(token):
@@ -602,7 +547,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         # Add a MUX12 for each occurrence; the final MUX12 will later be removed.
         mux = MUX12()
         user_port, user = env[name]
-        link(mux, "in1", user_port, user)
+        link(("in1", mux), (user_port, user))
         env[name] = "out1", mux  # save for later
         return "out2", mux  # use now
 
@@ -611,11 +556,9 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         n = int(token)
         term = LAM()
         body = LAM()
-        term.pop("out")
-        link(term, "body", "out", body)
+        link(("body", term), ("out", body))
         if n == 0:
-            term.pop("var")
-            link(body, "body", "var", body)
+            link(("body", body), ("var", body))
             return "out", term
         f_port = "var"
         f: Term = term
@@ -624,15 +567,12 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         for _ in range(n - 1):
             app = APP()
             mux = MUX12()
-            link(mux, "in1", f_port, f)
-            link(app, "lhs", "out1", mux)
+            link(("in1", mux), (f_port, f))
+            link(("lhs", app), ("out1", mux))
             mux.pop("out2")
             f_port, f = "out2", mux
             x_port, x = "out", app
-        app = APP()
-        link(app, "out", "body", body)
-        link(app, "lhs", f_port, f)
-        link(app, "rhs", x_port, x)
+        APP()((f_port, f), (x_port, x), ("body", body))
         return "out", term
 
     raise ValueError(f"Unhandled token: {token}")
