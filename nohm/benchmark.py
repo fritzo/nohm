@@ -28,11 +28,11 @@ def factorial(args):
         APP APP APP factorial {n} id id
         """
         t0 = default_timer()
-        term = parse(text)
+        main = parse(text)
         t1 = default_timer()
-        term = reduce(term)
+        reduce(main)
         t2 = default_timer()
-        result = readback(term)
+        result = readback(main)
         t3 = default_timer()
         assert result == "LAM a a"
         row = (n, t1 - t0, t2 - t1, t3 - t2)

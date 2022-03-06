@@ -56,6 +56,11 @@ class MUX11(Term):  # Asperti's BOHM triangle
     in1: Port
     out: Port
 
+    def __call__(self, *args: Port) -> Port:
+        for port, arg in zip(self.ports, args):
+            setattr(self, port, arg)
+        return "out", self
+
 
 class MUX12(Term):  # aka fan-out aka dup aka delta
     """Binary sharing."""
@@ -142,6 +147,13 @@ class TOP(Term):
     out: Port
 
 
+class MAIN(Term):
+    """Main program entry point."""
+
+    ports = ("in1",)
+    in1: Port
+
+
 def link(lhs: Term, lhs_port: str, rhs_port: str, rhs: Term) -> None:
     """
     Create a bidirectional edge between a pair of ports on a pair of terms.
@@ -156,62 +168,77 @@ def link(lhs: Term, lhs_port: str, rhs_port: str, rhs: Term) -> None:
 # Garbage collection
 
 
-def collect(port: str, term: Term) -> None:
+def collect(term: Term) -> None:
     """
     Recursively garbage collects a term. See Asperti98a Figure 12.13 for rules.
     """
     # FIXME thee MUX rules need to check for safe fans. See Asperti98a.
-    if isinstance(term, MUX21) and port != "out":
-        mux = MUX11()
-        mux.out = term.pop("out")
-        mux.in1 = term.pop("in2" if port == "in1" else "in1")
-        return
+    if isinstance(term, MUX21) and term.out is not None:
+        assert term.in1 is None or term.in2 is None
+        if term.in1 is not None:
+            MUX11()(term.pop("in1"), term.pop("out"))
+            return
+        if term.in2 is not None:
+            MUX11()(term.pop("in2"), term.pop("out"))
+            return
 
-    if isinstance(term, MUX12) and port != "in1":
-        mux = MUX11()
-        mux.in1 = term.pop("in1")
-        mux.out = term.pop("out2" if port == "out1" else "out2")
-        return
+    if isinstance(term, MUX12) and term.in1 is not None:
+        assert term.out1 is None or term.out2 is None
+        if term.out1 is not None:
+            MUX11()(term.pop("in1"), term.pop("out1"))
+            return
+        if term.out2 is not None:
+            MUX11()(term.pop("in1"), term.pop("out2"))
+            return
 
     # Otherwise just propagate collection.
-    for p in term.ports:
-        if p != port:
-            t = term.pop(p)
-            if t is not None:
-                collect(*t)
+    for port in term.ports:
+        other = term.pop(port)
+        if other is not None:
+            other_port, other_term = other
+            other_term.pop(other_port)
+            collect(other_term)
 
 
 ################################################################################
 # Reduction
 
 
-def reduce(port: str, root: Term) -> Tuple[str, Term]:
+def reduce(main: MAIN) -> None:
     """
     Reduces a term to weak head normal form.
     See Asperti98a Figure 2.22 for sharing graph reduction rules.
     """
     # This finds beta redexes (APP-LAM pairs) by bubble sorting wrt the partial
-    # order MUX21 = JOIN > APP > LAM > MUX12, including rules:
+    # order {BOT,TOP} > {JOIN,MUX21} > APP > LAM > MUX12, including rules:
     #   APP(MUX21) -> MUX21(APP)
     #   APP(JOIN) -> JOIN(APP)
     #   MUX12(MUX21) -> wire or MUX21(MUX12)
     #   MUX12(JOIN) -> JOIN(MUX12)
     #   MUX12(LAM) -> LAM(MUX12)
+    #   JOIN(TOP) -> TOP
+    #   JOIN(BOT,x) -> x
+    #   MUX12(TOP) -> TOP  # Does this need to be safe-guarded?
+    #   MUX12(BOT) -> BOT  # Does this need to be safe-guarded?
+    #   APP(TOP,x) -> TOP
+    #   APP(BOT,x) -> BOT
+    #   LAM(x,TOP) -> TOP
+    #   LAM(x,BOT) -> BOT
     # We add other affine rules to aid simplification.
     #   MUX11(MUX?) -> MUX?
     #   MUX?(MUX11) -> MUX?
-    #   JOIN(TOP) -> TOP
-    #   JOIN(BOT,x) -> x
     # Note that when porting this to C, the C code should recycle terms
     # to reduce malloc overhead. See collect() calls in this function.
     # TODO handle levels in rules.
     # TODO check for stack self-collision and convert to BOT.
 
+    port, term = safe(main.in1)
     is_normal = False  # similar to HVM runtime's init
-    stack = [(is_normal, port, root)]
+    stack = [(is_normal, port, term)]
 
     while stack:
         is_normal, port, term = stack.pop()
+        assert not isinstance(term, MAIN)
 
         # Normalize subterms.
         if not is_normal:
@@ -229,6 +256,21 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
             continue
 
         # Henceforth subterms are weak head normalized
+        if isinstance(term, LAM):
+            assert port == "out"
+            body_port, body = safe(term.body)
+
+            # term = LAM var body
+            # body = {BOT,TOP}
+            # ------------------ LAM-BOT, LAM-TOP (eta conversion)
+            # term = body
+            if isinstance(body, (BOT, TOP)):
+                head_port, head = safe(term.pop("out"))
+                term.pop("body")
+                link(head, head_port, body_port, body)
+                collect(term)
+                continue
+
         if isinstance(term, APP):
             assert port == "out"
             lhs_port, lhs = safe(term.lhs)
@@ -240,9 +282,8 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
             if isinstance(lhs, (BOT, TOP)):
                 head_port, head = safe(term.pop("out"))
                 term.pop("lhs")
-                rhs_port, rhs = safe(term.pop("rhs"))
-                link(head, head_port, rhs_port, rhs)
-                collect("out", term)
+                link(head, head_port, lhs_port, lhs)
+                collect(term)
                 continue
 
             # term = APP lhs rhs
@@ -252,14 +293,14 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
             # var = rhs
             if isinstance(lhs, LAM):
                 assert lhs_port == "out"
-                head_port, head = safe(term.pop(port))  # FIXME requires a root
+                head_port, head = safe(term.pop(port))
                 body_port, body = safe(lhs.pop("body"))
                 link(head, head_port, body_port, body)
                 if lhs.var is not None:
                     var_port, var = safe(lhs.pop("var"))
                     rhs_port, rhs = safe(term.pop("rhs"))
                     link(rhs, rhs_port, var_port, var)
-                collect(port, term)
+                collect(term)
                 stack.append((False, body_port, body))
                 continue
 
@@ -280,7 +321,7 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                 app1_ = APP()(lhs1_, rhs1_)
                 app2_ = APP()(lhs2_, rhs2_)
                 MUX21()(app1_, app2_, head_)
-                collect(port, term)
+                collect(term)
                 # FIXME Is this right? HVM doesn't push here.
                 stack.append((False,) + safe(app2_))
                 stack.append((False,) + safe(app1_))
@@ -311,7 +352,7 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                 head_port, head = safe(term.pop("out"))
                 top_port, top = safe(term.pop("lhs"))
                 link(head, head_port, top_port, top)
-                collect("out", term)
+                collect(term)
                 continue
 
             # term = JOIN lhs rhs
@@ -322,7 +363,7 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                 head_port, head = safe(term.pop("out"))
                 top_port, top = safe(term.pop("rhs"))
                 link(head, head_port, top_port, top)
-                collect("out", term)
+                collect(term)
                 continue
 
             # term = JOIN lhs rhs
@@ -332,7 +373,7 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
             if isinstance(lhs, BOT):
                 head_port, head = safe(term.pop("out"))
                 term.pop("rhs")
-                collect("out", term)
+                collect(term)
                 link(head, head_port, rhs_port, rhs)
                 continue
 
@@ -343,7 +384,7 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
             if isinstance(rhs, BOT):
                 head_port, head = safe(term.pop("out"))
                 term.pop("lhs")
-                collect("out", term)
+                collect(term)
                 link(head, head_port, lhs_port, lhs)
                 continue
 
@@ -388,8 +429,7 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                         link(mux3, "in1", in1_port, in1)
                         link(mux4, "in1", in2_port, in2)
 
-                    collect(port, term)
-                    collect(x_port, x)
+                    collect(term)
                     continue
 
                 # out1, out2 = MUX12 x
@@ -405,8 +445,8 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                     out2_port, out2 = safe(term.pop("out2"))
                     lhs_port, lhs = safe(x.pop("lhs"))
                     rhs_port, rhs = safe(x.pop("rhs"))
-                    collect(port, term)
-                    collect(x_port, x)
+                    collect(term)
+                    collect(x)
                     lhs_mux = MUX21()
                     rhs_mux = MUX12()
                     join1 = JOIN()
@@ -434,8 +474,8 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                     out2_port, out2 = safe(term.pop("out2"))
                     var_port, var = safe(x.pop("var"))
                     body_port, body = safe(x.pop("body"))
-                    collect(port, term)
-                    collect(x_port, x)
+                    collect(term)
+                    collect(x)
                     var_mux = MUX21()
                     body_mux = MUX12()
                     lam1 = LAM()
@@ -450,8 +490,6 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                     link(out2, out2_port, "out", lam2)
                     continue
 
-    return safe(getattr(root, port))
-
 
 ################################################################################
 # Parsing : text -> graph
@@ -462,7 +500,7 @@ re_int = re.compile("[0-9]+$")
 Env = Dict[str, Tuple[str, Term]]
 
 
-def parse(text: str) -> Tuple[str, Term]:
+def parse(text: str) -> MAIN:
     """
     Parse a Polish notation string to create a term graph.
 
@@ -470,30 +508,26 @@ def parse(text: str) -> Tuple[str, Term]:
     :returns: The root term of an interaction net graph.
     :rtype: Term
     """
-    text = re.sub("#.*[\n\r]", "", text)  # remove comments
+    text = re.sub("#.*[\n\r]", " ", text)  # remove line comments
     tokens = text.strip().split()
     tokens.reverse()
     env: Env = {}
     port, term = _parse(tokens, env)
-    term.pop(port)
-    if DEBUG:
-        validate(term)
     assert not tokens, f"Extra input: {' '.join(tokens)}"
-    return port, term
+
+    main = MAIN()
+    link(main, "in1", port, term)
+    if DEBUG:
+        validate(main)
+    return main
 
 
 def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
     token = tokens.pop()
 
-    if re_varname.match(token):
-        name = token
-        assert name in env, name
-        # Add a MUX12 for each occurrence; the final MUX12 will later be removed.
-        mux = MUX12()
-        user_port, user = env[name]
-        link(mux, "in1", user_port, user)
-        env[name] = "out1", mux  # save for later
-        return "out2", mux  # use now
+    if token in ("BOT", "TOP"):
+        term = {"BOT": BOT, "TOP": TOP}[token]()
+        return "out", term
 
     if token in ("APP", "JOIN"):
         lhs_port, lhs = _parse(tokens, env)
@@ -501,10 +535,6 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         term = {"APP": APP, "JOIN": JOIN}[token]()
         link(term, "lhs", lhs_port, lhs)
         link(term, "rhs", rhs_port, rhs)
-        return "out", term
-
-    if token in ("BOT", "TOP"):
-        term = {"BOT": BOT, "TOP": TOP}[token]()
         return "out", term
 
     if token == "LAM":
@@ -526,7 +556,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
             # Eagerly eliminate the final mux.
             user_port, user = safe(used.out2)
             link(lam, "var", user_port, user)
-            collect("in1", used)
+            collect(used)
         return "out", lam
 
     if token == "LET":  # syntactic sugar
@@ -537,7 +567,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         body_port, body = _parse(tokens, env)
         used_port, used = env[name]
         if used is defn:  # defn was never used.
-            collect(defn_port, defn)
+            collect(defn)
         else:  # Variable was used at least once.
             assert used_port == "out", used_port
             assert isinstance(used, MUX12), type(used).__name__
@@ -548,7 +578,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
             link(used, used_port, user_port, user)
             used.pop("out1")
             used.pop("in1")
-            collect("out2", used)
+            collect(used)
         return body_port, body
 
     if token == "LETREC":  # syntactic sugar
@@ -560,11 +590,21 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         used_port, used = env[name]
         assert isinstance(used, MUX12)
         if used is mux:  # Recursion was never used.
-            collect("in1", mux)
+            collect(mux)
             return body_port, body
         else:  # Recursion was used at least once.
             link(body, body_port, "in1", mux)
             return "out2", mux
+
+    if re_varname.match(token):
+        name = token
+        assert name in env, name
+        # Add a MUX12 for each occurrence; the final MUX12 will later be removed.
+        mux = MUX12()
+        user_port, user = env[name]
+        link(mux, "in1", user_port, user)
+        env[name] = "out1", mux  # save for later
+        return "out2", mux  # use now
 
     # Create a Church numeral.
     if re_int.match(token):
@@ -602,14 +642,16 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
 # Readback : graph -> text
 
 
-def readback(port: str, term: Term) -> str:
+def readback(main: MAIN) -> str:
     env: Dict[Term, str] = {}
+    port, term = safe(main.in1)
     tokens = _readback(port, term, env)
     tokens.reverse()
     return " ".join(tokens)
 
 
 def _readback(port: str, term: Term, env: Dict[Term, str]) -> List[str]:
+    assert not isinstance(term, MAIN)
 
     while isinstance(term, MUX12) and port in ("out1", "out2"):
         port, term = getattr(term, "in1")
