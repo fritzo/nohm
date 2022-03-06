@@ -7,7 +7,7 @@ lint: FORCE
 	python -m flake8
 	python -m black --check .
 	python -m isort --check .
-	python -m mypy *.py nohm test
+	python -m mypy --install-types *.py nohm test
 
 format: FORCE
 	python -m black .
