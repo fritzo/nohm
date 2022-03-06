@@ -4,8 +4,8 @@
 # NOHM: Nondeterministic Optimal Higher-order Machine
 
 This is a research implementation of optimal beta reduction
-([Asperti98a](#Asperti98a)), combining implementation ideas of
-[BOHM](https://github.com/asperti/BOHM1.1) ([Asperti98b](#Asperti98b)) with
+([Asperti98](#Asperti98)), combining implementation ideas of
+[BOHM](https://github.com/asperti/BOHM1.1) ([Asperti96](#Asperti96)) with
 engineering tricks of [HVM](https://github.com/Kindelia/HVM)
 ([Taelin22](#Taelin22)).
 
@@ -26,17 +26,18 @@ This architecture allows unit tests to be written in Python.
 ## References
 
 <dl>
-<dt> Asperti98a <a name="Asperti98a" /> </dt>
+<dt> Asperti96 <a name="Asperti96" /> </dt>
+    <dd>
+    Andrea Asperti, Cecilia Giovanetti, Andrea Naletto (1996)
+    "The Bologna Optimal Higher-order Machine"
+    (<a href="https://dx.doi.org/10.1017/S0956796800001994">doi</a> |
+    <a href="https://github.com/asperti/BOHM1.1">code</a>)
+    </dd>
+<dt> Asperti98 <a name="Asperti98" /> </dt>
     <dd>
     Andrea Asperti, Stefano Guerrini (1998)
     "The optimal implementation of functional programming languages"
     (<a href="https://doi.org/10.1145/505863.505887">doi</a>)
-    </dd>
-<dt> Asperti98b <a name="Asperti98b" /> </dt>
-    <dd>
-    Andrea Asperti, Stefano Guerrini (1998)
-    "Bolonga Optimal Higher-order Machine (BOHM)"
-    (<a href="https://github.com/asperti/BOHM1.1">code</a>)
     </dd>
 <dt>Barendregt84 <a name="Barendregt84" /> </dt>
     <dd>

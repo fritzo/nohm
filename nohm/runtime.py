@@ -173,9 +173,9 @@ def link(end1: Port, end2: Port) -> None:
 
 def collect(term: Term) -> None:
     """
-    Recursively garbage collects a term. See Asperti98a Figure 12.13 for rules.
+    Recursively garbage collects a term. See Asperti98 Figure 12.13 for rules.
     """
-    # FIXME these MUX rules need to check for safe fans. See Asperti98a.
+    # FIXME these MUX rules need to check for safe fans. See Asperti98.
     if isinstance(term, MUX21) and term.out is not None:
         assert term.in1 is None or term.in2 is None
         if term.in1 is not None:
@@ -210,7 +210,7 @@ def collect(term: Term) -> None:
 def reduce(main: MAIN) -> None:
     """
     Reduces a term to weak head normal form.
-    See Asperti98a Figure 2.22 for sharing graph reduction rules.
+    See Asperti98 Figure 2.22 for sharing graph reduction rules.
     """
     # This finds beta redexes (APP-LAM pairs) by bubble sorting wrt the partial
     # order {BOT,TOP} > {JOIN,MUX21} > APP > LAM > MUX12, including rules:

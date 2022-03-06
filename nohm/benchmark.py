@@ -6,7 +6,7 @@ from .runtime import parse, readback, reduce
 
 def factorial(args):
     """
-    See Asperti98a ss 9.5 pp 296.
+    See Asperti98 ss 9.5 pp 296.
     This uses a slightly simplified form of nextfact.
     """
     rows = []
