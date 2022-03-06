@@ -54,22 +54,30 @@ def safe(port: Port) -> Tuple[str, Term]:
     return port
 
 
-# Consider refactoring (FAN,LEV) into oriented (MUX11,MUX12,MUX21).
-class FAN(Term):  # aka delta
+class MUX11(Term):  # Asperti's BOHM triangle
+    """Level stepping."""
+
+    ports = "out", "in1"
+    out: Port
+    in1: Port
+
+
+class MUX12(Term):  # aka fan aka delta
+    """Binary sharing."""
+
+    ports = "in1", "out1", "out2"  # Similar to HVM's PAR,DP0,DP1
+    in1: Port
+    out1: Port
+    out2: Port
+
+
+class MUX21(Term):  # aka fan aka delta
     """Binary sharing."""
 
     ports = "out", "in1", "in2"  # Similar to HVM's PAR,DP0,DP1
     out: Port
     in1: Port
     in2: Port
-
-
-class LEV(Term):  # Asperti's BOHM triangle
-    """Level stepping."""
-
-    ports = "out", "in1"
-    out: Port
-    in1: Port
 
 
 class LAM(Term):  # aka lambda aka abs
@@ -113,15 +121,17 @@ def collect(port: str, term: Term) -> None:
     """
     Recursively garbage collects a term. See Asperti98a Figure 12.13 for rules.
     """
-    if isinstance(term, FAN) and port != "out":
-        # FIXME this needs to check for safe fans. See Asperti98a.
-        # in1, _ = FAN out
-        # ----------------
-        # in1 = LEV out
-        lev = LEV()
-        lev.out = term.pop("out")
-        if port == "in1":
-            lev.in1 = term.pop("in2" if port == "in1" else "in1")
+    # FIXME thee MUX rules need to check for safe fans. See Asperti98a.
+    if isinstance(term, MUX21) and port != "out":
+        mux = MUX11()
+        mux.out = term.pop("out")
+        mux.in1 = term.pop("in2" if port == "in1" else "in1")
+        return
+
+    if isinstance(term, MUX12) and port != "in1":
+        mux = MUX11()
+        mux.in1 = term.pop("in1")
+        mux.out = term.pop("out2" if port == "out1" else "out2")
         return
 
     # Otherwise just propagate collection.
@@ -156,8 +166,9 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
 
         # Normalize subterms.
         if not is_normal:
-            if isinstance(term, FAN):
-                assert port != "out", "unexpected sharing"
+            # TODO what if isinstance(term, MUX12)? fork?
+            if isinstance(term, MUX21):
+                assert port != "out", port
                 stack.append((True, port, term))
                 stack.append((False, "out", safe(term.out)[-1]))
             elif isinstance(term, APP):
@@ -191,27 +202,27 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                 continue
 
             # term = APP lhs rhs
-            # lhs = FAN in1 in2
-            # -------------------- APP-FAN aka APP-PAR
-            # term = FAN app1 app2
-            # rhs1, rhs2 = FAN rhs
+            # lhs = MUX21 in1 in2
+            # ---------------------- APP-MUX aka APP-PAR
+            # term = MUX21 app1 app2
+            # rhs1, rhs2 = MUX21 rhs
             # app1 = APP in1 rhs1
             # app2 = APP in2 rhs2
-            if isinstance(lhs, FAN) and lhs_port == "out":
+            if isinstance(lhs, MUX21) and lhs_port == "out":
                 head_port, head = getattr(term, port)
                 rhs_port, rhs = safe(term.pop("rhs"))
                 in1_port, in1 = safe(lhs.pop("in1"))
                 in2_port, in2 = safe(lhs.pop("in2"))
                 collect(port, term)
-                term = FAN()
-                rhs_fan = FAN()
+                term = MUX21()
+                rhs_mux = MUX21()
                 app1 = APP()
                 app2 = APP()
-                link(rhs_fan, "out", rhs_port, rhs)
+                link(rhs_mux, "out", rhs_port, rhs)
                 link(app1, "lhs", in1_port, in1)
-                link(app1, "rhs", "in1", rhs_fan)
+                link(app1, "rhs", "in1", rhs_mux)
                 link(app2, "lhs", in2_port, in2)
-                link(app2, "rhs", "in2", rhs_fan)
+                link(app2, "rhs", "in2", rhs_mux)
                 link(term, "in1", "out", app1)
                 link(term, "in2", "out", app2)
                 link(head, head_port, "out", term)
@@ -220,78 +231,78 @@ def reduce(port: str, root: Term) -> Tuple[str, Term]:
                 stack.append((False, "out", app1))
                 continue
 
-        if isinstance(term, FAN):
-            if port == "out":
-                out_port, out = safe(term.out)
+        if isinstance(term, MUX12):
+            if port != "out":
+                x_port, x = safe(term.in1)
 
-                if isinstance(out, FAN):
-                    assert out_port == "out"
-                    in1_port, in1 = safe(term.pop("in1"))
-                    in2_port, in2 = safe(term.pop("in2"))
-                    in3_port, in3 = safe(out.pop("in1"))
-                    in4_port, in4 = safe(out.pop("in2"))
+                if isinstance(x, MUX21):
+                    assert x_port == "out"
+                    out1_port, out1 = safe(term.pop("out1"))
+                    out2_port, out2 = safe(term.pop("out2"))
+                    in1_port, in1 = safe(x.pop("in1"))
+                    in2_port, in2 = safe(x.pop("in2"))
 
-                    # in1, in2 = out
-                    # in3, in4 = out
-                    # --------------- FAN-FAN-elim aka DUP-PAR (equal)
-                    # in1 = in3
-                    # in2 = in4
-                    if term.level == out.level:
-                        link(in1, in1_port, in3_port, in3)
-                        link(in2, in2_port, in4_port, in4)
+                    # out1, out2 = MUX12 x
+                    # x = MUX21 in1 in2
+                    # -------------------- MUX-MUX-elim aka DUP-PAR (equal)
+                    # out1 = in1
+                    # out2 = in2
+                    if term.level == x.level:
+                        link(in1, in1_port, out1_port, out1)
+                        link(in2, in2_port, out2_port, out2)
 
-                    # in1, in2 = FAN out
-                    # in3, in4 = FAN out
-                    # ------------------ FAN-FAN-intro aka DUP-PAR (different)
-                    # x13, x14 = FAN in1
-                    # x23, x23 = FAN in2
-                    # x13, x23 = FAN in3
-                    # x14, x24 = FAN in4
+                    # out1, out2 = MUX12 x
+                    # x = MUX21 in1 in2
+                    # -------------------- MUX-MUX-intro aka DUP-PAR (different)
+                    # out1 = MUX21 x11 x12
+                    # out2 = MUX21 x21 x22
+                    # x11, x21 = MUX12 in1
+                    # x12, x22 = MUX12 in2
                     else:
-                        fan1 = FAN()
-                        fan2 = FAN()
-                        fan3 = FAN()
-                        fan4 = FAN()
-                        link(in1, in1_port, "out", fan1)
-                        link(in2, in2_port, "out", fan2)
-                        link(in3, in3_port, "out", fan3)
-                        link(in4, in4_port, "out", fan4)
-                        link(fan1, "in1", "in1", fan3)
-                        link(fan1, "in2", "in1", fan4)
-                        link(fan2, "in1", "in2", fan3)
-                        link(fan2, "in2", "in2", fan4)
+                        mux1 = MUX21()
+                        mux2 = MUX21()
+                        mux3 = MUX12()
+                        mux4 = MUX12()
+                        link(out1, out1_port, "out", mux1)
+                        link(out2, out2_port, "out", mux2)
+                        link(mux1, "in1", "out1", mux3)
+                        link(mux1, "in2", "out1", mux4)
+                        link(mux2, "in1", "out2", mux3)
+                        link(mux2, "in2", "out2", mux4)
+                        link(mux3, "in1", in1_port, in1)
+                        link(mux4, "in1", in2_port, in2)
 
                     collect(port, term)
-                    collect(out_port, out)
+                    collect(x_port, x)
                     continue
 
-                # in1, in2 = FAN out
-                # out = LAM var body
-                # ----------------------- FAN-LAM aka DUP-LAM
-                # in1 = LAM var1 body1
-                # in2 = LAM var2 body2
-                # var1, var2 = FAN var1
-                # body1, body2 = FAN body
-                if isinstance(out, LAM):
-                    assert out_port == "out"
-                    in1_port, in1 = safe(term.pop("in1"))
-                    in2_port, in2 = safe(term.pop("in2"))
-                    var_port, var = safe(out.pop("var"))
-                    body_port, body = safe(out.pop("body"))
+                # out1, out2 = MUX12 x
+                # x = LAM var body
+                # ------------------------- MUX-LAM aka DUP-LAM
+                # out1 = LAM var1 body1
+                # out2 = LAM var2 body2
+                # var = MUX21 var1 var2
+                # body1, body2 = MUX12 body
+                if isinstance(x, LAM):
+                    assert x_port == "out"
+                    out1_port, out1 = safe(term.pop("out1"))
+                    out2_port, out2 = safe(term.pop("out2"))
+                    var_port, var = safe(x.pop("var"))
+                    body_port, body = safe(x.pop("body"))
                     collect(port, term)
-                    collect(out_port, out)
-                    var_fan = FAN()
-                    body_fan = FAN()
+                    collect(x_port, x)
+                    var_mux = MUX21()
+                    body_mux = MUX12()
                     lam1 = LAM()
                     lam2 = LAM()
-                    link(var_fan, "out", var_port, var)
-                    link(body_fan, "out", body_port, body)
-                    link(lam1, "var", "in1", var_fan)
-                    link(lam1, "body", "in1", body_fan)
-                    link(lam2, "var", "in2", var_fan)
-                    link(lam2, "body", "in2", body_fan)
-                    link(in1, in1_port, "out", lam1)
-                    link(in2, in2_port, "out", lam2)
+                    link(var_mux, "in1", var_port, var)
+                    link(body_mux, "out", body_port, body)
+                    link(lam1, "var", "out1", var_mux)
+                    link(lam1, "body", "in1", body_mux)
+                    link(lam2, "var", "out2", var_mux)
+                    link(lam2, "body", "in2", body_mux)
+                    link(out1, out1_port, "out", lam1)
+                    link(out2, out2_port, "out", lam2)
                     continue
 
     return safe(getattr(root, port))
@@ -332,12 +343,12 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
     if re_varname.match(token):
         name = token
         assert name in env, name
-        # Add a FAN for each occurrence; the final FAN will later be removed.
-        fan = FAN()
+        # Add a MUX12 for each occurrence; the final MUX12 will later be removed.
+        mux = MUX12()
         user_port, user = env[name]
-        link(fan, "out", user_port, user)
-        env[name] = "in1", fan  # save for later
-        return "in2", fan  # use now
+        link(mux, "in1", user_port, user)
+        env[name] = "out1", mux  # save for later
+        return "out2", mux  # use now
 
     if token == "APP":
         lhs_port, lhs = _parse(tokens, env)
@@ -360,13 +371,13 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
             assert used_port == "var", used_port
             unlink(lam, "var")
         else:  # Variable was used at least once.
-            assert used_port == "in1", used_port
-            assert isinstance(used, FAN), type(used).__name__
-            assert used.in1 is None, used.in1
-            # Eagerly eliminate the final FAN-_ pair.
-            user_port, user = safe(used.in2)
+            assert used_port == "out1", used_port
+            assert isinstance(used, MUX12), type(used).__name__
+            assert used.out1 is None, used.out1
+            # Eagerly eliminate the final mux.
+            user_port, user = safe(used.out2)
             link(lam, "var", user_port, user)
-            collect("out", used)
+            collect("in1", used)
         return "out", lam
 
     if token == "LET":  # syntactic sugar
@@ -380,32 +391,31 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
             collect(defn_port, defn)
         else:  # Variable was used at least once.
             assert used_port == "out", used_port
-            assert isinstance(used, FAN), type(used).__name__
-            assert used.in2 is None, used.in2
-            # Eagerly eliminate the final FAN-_ pair.
-            user_port, user = safe(used.in1)
-            used_port, used = safe(used.out)
-            assert isinstance(used, FAN)
+            assert isinstance(used, MUX12), type(used).__name__
+            assert used.out2 is None, used.out2
+            # Eagerly eliminate the final mux.
+            user_port, user = safe(used.out1)
+            used_port, used = safe(used.in1)
             link(used, used_port, user_port, user)
+            used.pop("out1")
             used.pop("in1")
-            used.pop("out")
-            collect("in2", used)
+            collect("out2", used)
         return body_port, body
 
     if token == "LETREC":  # syntactic sugar
         name = tokens.pop()
-        fan = FAN()
+        mux = MUX12()
         env = env.copy()
-        env[name] = "in1", fan
+        env[name] = "out1", mux
         body_port, body = _parse(tokens, env)
         used_port, used = env[name]
-        assert isinstance(used, FAN)
-        if used is fan:  # Recursion was never used.
-            collect("out", fan)
+        assert isinstance(used, MUX12)
+        if used is mux:  # Recursion was never used.
+            collect("in1", mux)
             return body_port, body
         else:  # Recursion was used at least once.
-            link(body, body_port, "out", fan)
-            return "in2", fan
+            link(body, body_port, "in1", mux)
+            return "out2", mux
 
     # Create a Church numeral.
     if re_int.match(token):
@@ -424,11 +434,11 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         x: Term = body
         for _ in range(n - 1):
             app = APP()
-            fan = FAN()
-            link(fan, "out", f_port, f)
-            link(app, "lhs", "in1", fan)
-            unlink(fan, "in2")
-            f_port, f = "in2", fan
+            mux = MUX12()
+            link(mux, "in1", f_port, f)
+            link(app, "lhs", "out1", mux)
+            unlink(mux, "out2")
+            f_port, f = "out2", mux
             x_port, x = "out", app
         app = APP()
         link(app, "out", "body", body)
@@ -454,10 +464,11 @@ def readback(port: str, term: Term) -> str:
 
 def _readback(port: str, term: Term, env: Dict[Term, str]) -> List[str]:
 
-    while isinstance(term, FAN) and port in ("in1", "in2"):
-        port, term = getattr(term, "out")
+    while isinstance(term, MUX12) and port in ("out1", "out2"):
+        port, term = getattr(term, "in1")
         # TODO support sharing via LET
         # TODO support looping via LETREC
+    # TODO handle MUX21
 
     if isinstance(term, LAM):
         if port == "out":
