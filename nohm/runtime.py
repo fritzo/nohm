@@ -572,10 +572,15 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         name = tokens.pop()
         assert re_varname.match(name), name
         lam = LAM()
-        env = env.copy()
+
+        # Parse in an extended environment.
+        old = env.get(name)
         env[name] = "var", lam
         link(("body", lam), _parse(tokens, env))
-        var_port, var = env[name]
+        var_port, var = env.pop(name)
+        if old is not None:
+            env[name] = old
+
         if var is lam:  # Variable was never used.
             assert var_port == "var", var_port
             lam.pop("var")
@@ -593,28 +598,40 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
     if token == "LET":  # syntactic sugar
         name = tokens.pop()
         defn_port, defn = _parse(tokens, env)
-        env = env.copy()
+
+        # Parse in an extended environment.
+        old = env.get(name)
         env[name] = defn_port, defn
         body_port, body = _parse(tokens, env)
-        var_port, var = env[name]
+        var_port, var = env.pop(name)
+        if old is not None:
+            env[name] = old
+
         if var is defn:  # defn was never used.
             collect(defn)
         else:  # Variable was used at least once.
-            assert var_port == "out", var_port
             assert isinstance(var, MUX12), type(var).__name__
-            assert var.out2 is None, var.out2
+            assert var_port == "out1", var_port
+            assert var.in1 is not None
+            assert var.out1 is None, var.out1
+            assert var.out2 is not None
             # Eagerly eliminate the final mux.
-            link(var.pop("in1"), var.pop("out1"))
+            link(var.pop("in1"), var.pop("out2"))
             collect(var)
         return body_port, body
 
     if token == "LETREC":  # syntactic sugar
         name = tokens.pop()
         mux = MUX12()
-        env = env.copy()
+
+        # Parse in an extended environment.
+        old = env.get(name)
         env[name] = "out1", mux
         body_port, body = _parse(tokens, env)
-        var_port, var = env[name]
+        var_port, var = env.pop(name)
+        if old is not None:
+            env[name] = old
+
         assert isinstance(var, MUX12)
         if var is mux:  # Recursion was never used.
             collect(mux)
@@ -627,11 +644,9 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         name = token
         assert name in env, name
         # Add a MUX12 for each occurrence; the final MUX12 will later be removed.
-        mux = MUX12()
-        user_port, user = env[name]
-        link(("in1", mux), (user_port, user))
-        env[name] = "out1", mux  # save for later
-        return "out2", mux  # use now
+        out1, out2 = MUX12()(env[name])
+        env[name] = out1  # save for later
+        return out2  # use now
 
     # Create a Church numeral.
     if re_int.match(token):
@@ -658,6 +673,15 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
         return "out", term
 
     raise ValueError(f"Unhandled token: {token}")
+
+
+if DEBUG >= 2:
+    _parse_base = _parse
+
+    def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
+        port, term = _parse_base(tokens, env)
+        print(port, type(term).__name__)
+        return port, term
 
 
 ################################################################################

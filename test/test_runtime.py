@@ -1,20 +1,9 @@
 import gc
-import re
 from collections import Counter
-from typing import Dict
 
 import pytest
 
-from nohm.runtime import (
-    Term,
-    collect,
-    gensym,
-    parse,
-    re_varname,
-    readback,
-    reduce,
-    validate,
-)
+from nohm.runtime import Term, collect, gensym, parse, readback, reduce, validate
 
 
 def get_term_stats():
@@ -32,22 +21,6 @@ def test_gensym():
     assert gensym(26 + 26**2) == "aaa"
 
 
-def normalize_text(text):
-    """
-    Normalizes text by removing comments, normalizing whitespace, and alpha
-    converting.
-    """
-    text = re.sub("#.*[\n\r]", "", text)  # remove comments
-    tokens = text.strip().split()
-    rename: Dict[str, str] = {}
-    for i, token in enumerate(tokens):
-        if re_varname.match(token):
-            if token not in rename:
-                rename[token] = gensym(len(rename))
-            tokens[i] = rename[token]
-    return " ".join(tokens)
-
-
 PARSE_EXAMPLES = [
     ("BOT", "BOT"),
     ("TOP", "TOP"),
@@ -55,6 +28,8 @@ PARSE_EXAMPLES = [
     ("LAM a BOT", "LAM a BOT"),
     ("LAM a TOP", "LAM a TOP"),
     ("LAM a a", "LAM a a"),
+    ("LAM a APP a a", "LAM a APP a a"),
+    ("LAM a APP a APP a a", "LAM a APP a APP a a"),
     ("LAM a LAM b a", "LAM a LAM b a"),
     ("LAM a LAM b b", "LAM a LAM b b"),
     ("LAM a LAM a a", "LAM a LAM b b"),
@@ -71,9 +46,8 @@ PARSE_EXAMPLES = [
 ]
 
 
-@pytest.mark.parametrize("text,_", PARSE_EXAMPLES)
-def test_parse_readback(text, _):
-    expected = normalize_text(text)
+@pytest.mark.parametrize("text,expected", PARSE_EXAMPLES)
+def test_parse_readback(text, expected):
     main = parse(text)
     validate(main)
     actual = readback(main)
