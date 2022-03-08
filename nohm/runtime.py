@@ -19,13 +19,15 @@ class Term:
     """
 
     ports: Tuple[str, ...] = ()
+    level: int
+    is_safe: bool
 
-    def __init__(self):
+    def __init__(self, *, is_safe=True):
         super().__init__()
         for port in self.ports:
             setattr(self, port, None)  # initially unlinked
         self.level = 0
-        # TODO add a safe tag as in Asperti98
+        self.is_safe = is_safe  # Asperti98 ss 9.4 pp 291.
 
     def pop(self, port: str) -> "Port":
         assert port in self.ports
@@ -43,7 +45,10 @@ class Term:
 Port = Optional[Tuple[str, "Term"]]
 
 
-def safe(port: Port) -> Tuple[str, Term]:
+def assume_some(port: Port) -> Tuple[str, Term]:
+    """
+    Cast a ``Port`` to a ``Tuple[str, Term]``, assuming it is not None.
+    """
     assert port is not None
     return port
 
@@ -138,6 +143,11 @@ class BOT(Term):
     ports = ("out",)
     out: Port
 
+    def __call__(self, arg: Port) -> Tuple[str, Term]:
+        result = "out", self
+        link(result, arg)
+        return result
+
 
 class TOP(Term):
     """Error, i.e. join over all terms."""
@@ -145,12 +155,22 @@ class TOP(Term):
     ports = ("out",)
     out: Port
 
+    def __call__(self, arg: Port) -> Tuple[str, Term]:
+        result = "out", self
+        link(result, arg)
+        return result
+
 
 class MAIN(Term):
     """Main program entry point."""
 
     ports = ("in1",)
     in1: Port
+
+    def __call__(self, arg: Port) -> Tuple[str, Term]:
+        result = "in1", self
+        link(result, arg)
+        return result
 
 
 def link(end1: Port, end2: Port) -> None:
@@ -175,23 +195,26 @@ def collect(term: Term) -> None:
     """
     Recursively garbage collects a term. See Asperti98 Figure 12.13 for rules.
     """
-    # FIXME these MUX rules need to check for safe fans. See Asperti98.
     if isinstance(term, MUX21) and term.out is not None:
         assert term.in1 is None or term.in2 is None
         if term.in1 is not None:
-            MUX11()(term.pop("in1"), term.pop("out"))
+            if term.is_safe:
+                MUX11()(term.pop("in1"), term.pop("out"))
             return
         if term.in2 is not None:
-            MUX11()(term.pop("in2"), term.pop("out"))
+            if term.is_safe:
+                MUX11()(term.pop("in2"), term.pop("out"))
             return
 
     if isinstance(term, MUX12) and term.in1 is not None:
         assert term.out1 is None or term.out2 is None
         if term.out1 is not None:
-            MUX11()(term.pop("in1"), term.pop("out1"))
+            if term.is_safe:
+                MUX11()(term.pop("in1"), term.pop("out1"))
             return
         if term.out2 is not None:
-            MUX11()(term.pop("in1"), term.pop("out2"))
+            if term.is_safe:
+                MUX11()(term.pop("in1"), term.pop("out2"))
             return
 
     # Otherwise just propagate collection.
@@ -221,8 +244,8 @@ def reduce(main: MAIN) -> None:
     #   MUX12(LAM) -> LAM(MUX12)
     #   JOIN(TOP) -> TOP
     #   JOIN(BOT,x) -> x
-    #   MUX12(TOP) -> TOP  # Does this need to be safe-guarded?
-    #   MUX12(BOT) -> BOT  # Does this need to be safe-guarded?
+    #   MUX12(TOP) -> TOP
+    #   MUX12(BOT) -> BOT
     #   APP(TOP,x) -> TOP
     #   APP(BOT,x) -> BOT
     # We additionally implement rules merging MUX11 into any other mux.
@@ -231,7 +254,7 @@ def reduce(main: MAIN) -> None:
     # TODO handle levels in rules.
     # TODO check for stack self-collision and convert to BOT.
 
-    port, term = safe(main.in1)
+    port, term = assume_some(main.in1)
     is_normal = False  # similar to HVM runtime's init
     stack = [(is_normal, port, term)]
 
@@ -245,15 +268,15 @@ def reduce(main: MAIN) -> None:
             if isinstance(term, MUX21):
                 assert port != "out", port
                 stack.append((True, port, term))
-                stack.append((False, "out", safe(term.out)[-1]))
+                stack.append((False, "out", assume_some(term.out)[-1]))
             elif isinstance(term, APP):
                 stack.append((True, port, term))
-                stack.append((False,) + safe(term.lhs))
+                stack.append((False,) + assume_some(term.lhs))
             elif isinstance(term, JOIN):
                 stack.append((True, port, term))
                 # Could the C runtime fork here?
-                stack.append((False,) + safe(term.lhs))
-                stack.append((False,) + safe(term.rhs))
+                stack.append((False,) + assume_some(term.lhs))
+                stack.append((False,) + assume_some(term.rhs))
             elif isinstance(term, LAM):
                 pass
             continue
@@ -261,7 +284,7 @@ def reduce(main: MAIN) -> None:
         # Henceforth subterms are weak head normalized
         if isinstance(term, APP):
             assert port == "out"
-            lhs_port, lhs = safe(term.lhs)
+            lhs_port, lhs = assume_some(term.lhs)
 
             # term = APP lhs rhs
             # lhs = {BOT,TOP}
@@ -279,7 +302,7 @@ def reduce(main: MAIN) -> None:
             # var = rhs
             if isinstance(lhs, LAM):
                 assert lhs_port == "out"
-                body_port, body = safe(lhs.body)
+                body_port, body = assume_some(lhs.body)
                 link(term.pop(port), lhs.pop("body"))
                 if lhs.var is not None:
                     link(lhs.pop("var"), term.pop("rhs"))
@@ -302,8 +325,8 @@ def reduce(main: MAIN) -> None:
                 MUX21()(app1, app2, term.pop("out"))
                 collect(term)
                 # FIXME Is this right? HVM doesn't push here.
-                stack.append((False,) + safe(app2))
-                stack.append((False,) + safe(app1))
+                stack.append((False,) + assume_some(app2))
+                stack.append((False,) + assume_some(app1))
                 continue
 
             # term = APP lhs rhs
@@ -320,8 +343,8 @@ def reduce(main: MAIN) -> None:
         # Henceforth subterms are weak head normalized
         if isinstance(term, JOIN):
             assert port == "out"
-            lhs_port, lhs = safe(term.lhs)
-            rhs_port, rhs = safe(term.rhs)
+            lhs_port, lhs = assume_some(term.lhs)
+            rhs_port, rhs = assume_some(term.rhs)
 
             # term = JOIN lhs rhs
             # lhs = TOP
@@ -361,16 +384,18 @@ def reduce(main: MAIN) -> None:
 
         if isinstance(term, MUX11):
             assert port == "out"
-            x_port, x = safe(term.in1)
+            x_port, x = assume_some(term.in1)
 
             # out = MUX11 x
             # x = MUX11 in1
             # --------------- MUX11-MUX11
             # out = MUX11 in1
             if isinstance(x, MUX11):
-                link(x.pop("out"), x.pop("in1"))
-                collect(x)
-                stack.append((False, "out", term))
+                if not x.is_safe:
+                    continue
+                link(term.pop("out"), term.pop("in1"))
+                collect(term)
+                stack.append((False, "out", x))
                 continue
 
             # out = MUX11 x
@@ -378,6 +403,8 @@ def reduce(main: MAIN) -> None:
             # ------------------- MUX11-MUX21
             # out = MUX21 in1 in2
             if isinstance(x, MUX21):
+                if not x.is_safe:
+                    continue
                 link(term.pop("out"), term.pop("in1"))
                 collect(term)
                 stack.append((False, x_port, x))
@@ -388,6 +415,8 @@ def reduce(main: MAIN) -> None:
             # ---------------------- MUX11-MUX12
             # out2, out1 = MUX12 in1
             if isinstance(x, MUX12):
+                if not x.is_safe:
+                    continue
                 link(term.pop("out"), term.pop("in1"))
                 collect(term)
                 stack.append((False, x_port, x))
@@ -398,6 +427,8 @@ def reduce(main: MAIN) -> None:
             # ---------------------- MUX11-MUX12
             # out1, out2 = MUX12 in1
             if isinstance(x, MUX12):
+                if not x.is_safe:
+                    continue
                 link(term.pop("out"), term.pop("in1"))
                 collect(term)
                 stack.append((False, x_port, x))
@@ -405,7 +436,7 @@ def reduce(main: MAIN) -> None:
 
         if isinstance(term, MUX12):
             assert port in ("out1", "out2")
-            x_port, x = safe(term.in1)
+            x_port, x = assume_some(term.in1)
 
             # out1, out2 = MUX12 x
             # x = JOIN lhs, rhs
@@ -424,6 +455,30 @@ def reduce(main: MAIN) -> None:
                 continue
 
             # out1, out2 = MUX12 x
+            # x = TOP
+            # ------------------------- MUX12-TOP
+            # out1 = TOP
+            # out2 = TOP
+            if isinstance(x, TOP):
+                assert x_port == "out"
+                TOP()(term.pop("out1"))
+                TOP()(term.pop("out2"))
+                collect(term)
+                continue
+
+            # out1, out2 = MUX12 x
+            # x = BOT
+            # ------------------------- MUX12-BOT
+            # out1 = BOT
+            # out2 = BOT
+            if isinstance(x, BOT):
+                assert x_port == "out"
+                BOT()(term.pop("out1"))
+                BOT()(term.pop("out2"))
+                collect(term)
+                continue
+
+            # out1, out2 = MUX12 x
             # x = LAM var body
             # ------------------------- MUX-LAM aka DUP-LAM
             # out1 = LAM var1 body1
@@ -432,10 +487,11 @@ def reduce(main: MAIN) -> None:
             # body1, body2 = MUX12 body
             if isinstance(x, LAM):
                 assert x_port == "out"
-                body1, body2 = MUX12()(x.pop("body"))
+                # is_safe is reset as per Asperti98 ss 9.4 rule (ii).
+                body1, body2 = MUX12(is_safe=False)(x.pop("body"))
                 var1, out1 = LAM()(None, body1, term.pop("out1"))
                 var2, out2 = LAM()(None, body2, term.pop("out2"))
-                MUX21()(var1, var2, x.pop("var"))
+                MUX21(is_safe=False)(var1, var2, x.pop("var"))
                 collect(term)
                 continue
 
@@ -445,6 +501,9 @@ def reduce(main: MAIN) -> None:
             # out1, out2 = MUX12 in1
             if isinstance(x, MUX11):
                 assert x_port == "out"
+                if not x.is_safe:
+                    continue
+                term.is_safe = True
                 link(x.pop("out"), x.pop("in1"))
                 collect(x)
                 stack.append((False, port, term))
@@ -485,8 +544,11 @@ def reduce(main: MAIN) -> None:
             # x = MUX11 in1
             # ------------------- MUX21-MUX11-left
             # out = MUX12 in1 in2
-            in1_port, in1 = safe(term.in1)
+            in1_port, in1 = assume_some(term.in1)
             if isinstance(in1, MUX11):
+                if not x.is_safe:
+                    continue
+                term.is_safe = True
                 link(in1.pop("out"), in1.pop("in1"))
                 collect(in1)
                 stack.append((False, port, term))
@@ -496,8 +558,11 @@ def reduce(main: MAIN) -> None:
             # x = MUX11 in2
             # ------------------- MUX21-MUX11-right
             # out = MUX12 in1 in2
-            in2_port, in2 = safe(term.in2)
+            in2_port, in2 = assume_some(term.in2)
             if isinstance(in2, MUX11):
+                if not x.is_safe:
+                    continue
+                term.is_safe = True
                 link(in2.pop("out"), in2.pop("in1"))
                 collect(in2)
                 stack.append((False, port, term))
@@ -604,7 +669,7 @@ def _parse(tokens: List[str], env: Env) -> Tuple[str, Term]:
             # Eagerly eliminate the final mux.
             if var.out2 is None:
                 assert result == ("out2", var)
-                result = safe(var.pop("in1"))
+                result = assume_some(var.pop("in1"))
             else:
                 link(var.pop("in1"), var.pop("out2"))
             collect(var)
@@ -674,7 +739,7 @@ if DEBUG >= 2:
 
 def readback(main: MAIN) -> str:
     env: Dict[Term, str] = {}
-    port, term = safe(main.in1)
+    port, term = assume_some(main.in1)
     tokens = _readback(port, term, env)
     tokens.reverse()
     return " ".join(tokens)
@@ -694,15 +759,15 @@ def _readback(port: str, term: Term, env: Dict[Term, str]) -> List[str]:
             # FIXME this breaks under shared LAM terms
             name = gensym(len(env))
             env[term] = name
-            body = _readback(*safe(term.body), env)
+            body = _readback(*assume_some(term.body), env)
             return body + [name, "LAM"]
         if port == "var":
             name = env[term]
             return [name]
 
     if isinstance(term, (APP, JOIN)):
-        lhs = _readback(*safe(term.lhs), env)
-        rhs = _readback(*safe(term.rhs), env)
+        lhs = _readback(*assume_some(term.lhs), env)
+        rhs = _readback(*assume_some(term.rhs), env)
         return rhs + lhs + [type(term).__name__]
 
     if isinstance(term, (BOT, TOP)):
