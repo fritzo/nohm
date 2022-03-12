@@ -20,7 +20,7 @@ class Term:
     """
 
     ports: Tuple[str, ...] = ()
-    level: int = INVALID
+    rank: int = INVALID
     is_safe: bool = True  # Asperti98 ss 9.4 pp 291.
 
     def __init__(self, **attrs):
@@ -63,7 +63,7 @@ class MUX11(Term):  # Asperti's BOHM triangle
     ports = "in1", "out"
     in1: Port
     out: Port
-    level1: int = INVALID
+    rank1: int = INVALID
 
     def __call__(self, *args: Port) -> Tuple[str, Term]:
         for port, arg in zip(self.ports, args):
@@ -78,8 +78,8 @@ class MUX12(Term):  # aka fan-out aka dup aka delta
     in1: Port
     out1: Port
     out2: Port
-    level1: int = INVALID
-    level2: int = INVALID
+    rank1: int = INVALID
+    rank2: int = INVALID
 
     def __call__(self, *args: Port) -> Tuple[Tuple[str, Term], Tuple[str, Term]]:
         for port, arg in zip(self.ports, args):
@@ -94,8 +94,8 @@ class MUX21(Term):  # aka fan-in aka PAR aka delta
     in1: Port
     in2: Port
     out: Port
-    level1: int = INVALID
-    level2: int = INVALID
+    rank1: int = INVALID
+    rank2: int = INVALID
 
     def __call__(self, *args: Port) -> Tuple[str, Term]:
         for port, arg in zip(self.ports, args):
@@ -208,12 +208,12 @@ def collect(term: Term) -> None:
         assert term.in1 is None or term.in2 is None
         if term.in1 is not None:
             if term.is_safe:
-                mux = MUX11(level=term.level, level1=term.level1)
+                mux = MUX11(rank=term.rank, rank1=term.rank1)
                 mux(term.pop("in1"), term.pop("out"))
             return
         if term.in2 is not None:
             if term.is_safe:
-                mux = MUX11(level=term.level, level1=term.level2)
+                mux = MUX11(rank=term.rank, rank1=term.rank2)
                 mux(term.pop("in2"), term.pop("out"))
             return
 
@@ -221,12 +221,12 @@ def collect(term: Term) -> None:
         assert term.out1 is None or term.out2 is None
         if term.out1 is not None:
             if term.is_safe:
-                mux = MUX11(level=term.level, level1=term.level1)
+                mux = MUX11(rank=term.rank, rank1=term.rank1)
                 mux(term.pop("in1"), term.pop("out1"))
             return
         if term.out2 is not None:
             if term.is_safe:
-                mux = MUX11(level=term.level, level1=term.level2)
+                mux = MUX11(rank=term.rank, rank1=term.rank2)
                 mux(term.pop("in1"), term.pop("out2"))
             return
 
@@ -250,22 +250,25 @@ def reduce(main: MAIN) -> None:
     """
     # This finds beta redexes (APP-LAM pairs) by bubble sorting wrt the partial
     # order {BOT,TOP} > {JOIN,MUX21} > APP > LAM > MUX12, including rules:
-    #   APP(MUX21) -> MUX21(APP)
-    #   APP(JOIN) -> JOIN(APP)
     #   MUX12(MUX21) -> wire or MUX21(MUX12)
-    #   MUX12(JOIN) -> JOIN(MUX12)
     #   MUX12(LAM) -> LAM(MUX12)
-    #   JOIN(TOP) -> TOP
-    #   JOIN(BOT,x) -> x
+    #   MUX12(JOIN) -> JOIN(MUX12)
     #   MUX12(TOP) -> TOP
     #   MUX12(BOT) -> BOT
+    #   APP(MUX21) -> MUX21(APP)
+    #   APP(JOIN) -> JOIN(APP)
     #   APP(TOP,x) -> TOP
     #   APP(BOT,x) -> BOT
+    #   JOIN(TOP) -> TOP
+    #   JOIN(BOT,x) -> x
     # We additionally implement rules merging MUX11 into any other mux.
+    #   MUX11(MUX11) -> MUX11
+    #   MUX11(MUX12) -> MUX12
+    #   MUX11(MUX21) -> MUX21
+    #   MUX12(MUX11) -> MUX12
+    #   MUX21(MUX11) -> MUX21
     # Note that when porting this to C, the C code should recycle terms
     # to reduce malloc overhead. See collect() calls in this function.
-    # TODO handle levels in rules.
-    # TODO check for stack self-collision and convert to BOT.
 
     port, term = assume_some(main.in1)
     is_normal = False  # similar to HVM runtime's init
@@ -275,87 +278,7 @@ def reduce(main: MAIN) -> None:
         is_normal, port, term = stack.pop()
         assert not isinstance(term, MAIN)
 
-        # Normalize subterms.
-        if not is_normal:
-            # TODO what if isinstance(term, MUX12)? fork?
-            if isinstance(term, MUX21):
-                assert port != "out", port
-                stack.append((True, port, term))
-                stack.append((False, "out", assume_some(term.out)[-1]))
-            elif isinstance(term, APP):
-                stack.append((True, port, term))
-                stack.append((False,) + assume_some(term.lhs))
-            elif isinstance(term, JOIN):
-                stack.append((True, port, term))
-                # Could the C runtime fork here?
-                stack.append((False,) + assume_some(term.lhs))
-                stack.append((False,) + assume_some(term.rhs))
-            elif isinstance(term, LAM):
-                pass
-            continue
-
-        # Henceforth subterms are weak head normalized
-        if isinstance(term, APP):
-            assert port == "out"
-            lhs_port, lhs = assume_some(term.lhs)
-
-            # term = APP lhs rhs
-            # lhs = {BOT,TOP}
-            # ------------------ APP-BOT, APP-TOP
-            # term = lhs
-            if isinstance(lhs, (BOT, TOP)):
-                link(term.pop("out"), term.pop("lhs"))
-                collect(term)
-                continue
-
-            # term = APP lhs rhs
-            # lhs = LAM var body
-            # ------------------ APP-LAM aka beta
-            # term = body
-            # var = rhs
-            if isinstance(lhs, LAM):
-                assert lhs_port == "out"
-                body_port, body = assume_some(lhs.body)
-                link(term.pop(port), lhs.pop("body"))
-                if lhs.var is not None:
-                    link(lhs.pop("var"), term.pop("rhs"))
-                collect(term)
-                stack.append((False, body_port, body))
-                continue
-
-            # term = APP lhs rhs
-            # lhs = MUX21 lhs1 lhs2
-            # ---------------------- APP-MUX21 aka APP-PAR
-            # term = MUX21 app1 app2
-            # rhs1, rhs2 = MUX12 rhs
-            # app1 = APP lhs1 rhs1
-            # app2 = APP lhs2 rhs2
-            if isinstance(lhs, MUX21):
-                assert lhs_port == "out"
-                rhs_mux = MUX12(level=lhs.level, level1=lhs.level, level2=lhs.level)
-                out_mux = MUX12(level=lhs.level, level1=lhs.level, level2=lhs.level)
-                rhs1, rhs2 = rhs_mux(term.pop("rhs"))
-                app1 = APP(level=term.level + 1)(lhs.pop("in1"), rhs1)
-                app2 = APP(level=term.level + 1)(lhs.pop("in2"), rhs2)
-                out_mux(app1, app2, term.pop("out"))
-                collect(term)
-                # FIXME Is this right? HVM doesn't push here.
-                stack.append((False,) + assume_some(app2))
-                stack.append((False,) + assume_some(app1))
-                continue
-
-            # term = APP lhs rhs
-            # lhs = JOIN lhs1 lhs2
-            # ---------------------- APP-JOIN
-            # term = JOIN app1 app2
-            # rhs1, rhs2 = MUX21 rhs
-            # app1 = APP in1 rhs1
-            # app2 = APP in2 rhs2
-            if isinstance(lhs, JOIN):
-                assert lhs_port == "out"
-                raise NotImplementedError("TODO")
-
-        # Henceforth subterms are weak head normalized
+        # First propagate errors.
         if isinstance(term, JOIN):
             assert port == "out"
             lhs_port, lhs = assume_some(term.lhs)
@@ -379,23 +302,31 @@ def reduce(main: MAIN) -> None:
                 collect(term)
                 continue
 
-            # term = JOIN lhs rhs
-            # lhs = BOT
-            # ------------------ JOIN-BOT-left
-            # term = rhs
-            if isinstance(lhs, BOT):
-                link(term.pop("out"), term.pop("rhs"))
-                collect(term)
-                continue
+        # Normalize subterms.
+        if not is_normal:
+            # TODO what if isinstance(term, MUX12)? fork?
+            if isinstance(term, MUX11):
+                assert port == "out"
+                stack.append((False,) + assume_some(term.in1))
+                stack.append((True, port, term))
+            elif isinstance(term, MUX21):
+                assert port != "out"
+                stack.append((True, port, term))
+                stack.append((False, "out", assume_some(term.out)[-1]))
+            elif isinstance(term, APP):
+                assert port == "out"
+                stack.append((True, port, term))
+                stack.append((False,) + assume_some(term.lhs))
+            elif isinstance(term, JOIN):
+                stack.append((True, port, term))
+                # Could the C runtime fork here?
+                stack.append((False,) + assume_some(term.lhs))
+                stack.append((False,) + assume_some(term.rhs))
+            elif isinstance(term, LAM):
+                pass
+            continue
 
-            # term = JOIN lhs rhs
-            # rhs = BOT
-            # ------------------ JOIN-BOT-right
-            # term = lhs
-            if isinstance(rhs, BOT):
-                link(term.pop("out"), term.pop("lhs"))
-                collect(term)
-                continue
+        # Henceforth subterms are weak head normalized
 
         if isinstance(term, MUX11):
             assert port == "out"
@@ -408,7 +339,7 @@ def reduce(main: MAIN) -> None:
             if isinstance(x, MUX11):
                 if not x.is_safe:
                     continue
-                x.level1 += term.level1
+                x.rank1 += term.rank1
                 link(term.pop("out"), term.pop("in1"))
                 collect(term)
                 stack.append((False, "out", x))
@@ -428,9 +359,9 @@ def reduce(main: MAIN) -> None:
                 if not x.is_safe:
                     continue
                 if x_port == "out1":
-                    x.level1 += term.level1
+                    x.rank1 += term.rank1
                 else:
-                    x.level2 += term.level1
+                    x.rank2 += term.rank1
                 link(term.pop("out"), term.pop("in1"))
                 collect(term)
                 stack.append((False, x_port, x))
@@ -449,16 +380,12 @@ def reduce(main: MAIN) -> None:
             # rhs1, rhs2 = MUX12 rhs
             if isinstance(x, LAM):
                 assert x_port == "out"
-                lhs_mux = MUX12(
-                    level=term.level, level1=term.level1, level2=term.level2
-                )
-                rhs_mux = MUX12(
-                    level=term.level, level1=term.level1, level2=term.level2
-                )
+                lhs_mux = MUX12(rank=term.rank, rank1=term.rank1, rank2=term.rank2)
+                rhs_mux = MUX12(rank=term.rank, rank1=term.rank1, rank2=term.rank2)
                 lhs1, lhs2 = lhs_mux(x.pop("lhs"))
                 rhs1, rhs2 = rhs_mux(x.pop("rhs"))
-                JOIN(level=x.level + 1)(lhs1, rhs1, term.pop("out1"))
-                JOIN(level=x.level + 1)(lhs2, rhs2, term.pop("out2"))
+                JOIN(rank=x.rank + 1)(lhs1, rhs1, term.pop("out1"))
+                JOIN(rank=x.rank + 1)(lhs2, rhs2, term.pop("out2"))
                 collect(term)
                 continue
 
@@ -469,8 +396,8 @@ def reduce(main: MAIN) -> None:
             # out2 = TOP
             if isinstance(x, TOP):
                 assert x_port == "out"
-                TOP(level=x.level)(term.pop("out1"))
-                TOP(level=x.level)(term.pop("out2"))
+                TOP(rank=x.rank)(term.pop("out1"))
+                TOP(rank=x.rank)(term.pop("out2"))
                 collect(term)
                 continue
 
@@ -481,8 +408,8 @@ def reduce(main: MAIN) -> None:
             # out2 = BOT
             if isinstance(x, BOT):
                 assert x_port == "out"
-                BOT(level=x.level)(term.pop("out1"))
-                BOT(level=x.level)(term.pop("out2"))
+                BOT(rank=x.rank)(term.pop("out1"))
+                BOT(rank=x.rank)(term.pop("out2"))
                 collect(term)
                 continue
 
@@ -497,14 +424,14 @@ def reduce(main: MAIN) -> None:
                 assert x_port == "out"
                 # is_safe is reset as per Asperti98 ss 9.4 rule (ii).
                 body_mux = MUX12(
-                    is_safe=False, level=x.level, level1=term.level1, leve2=term.level1
+                    is_safe=False, rank=x.rank, rank1=term.rank1, leve2=term.rank1
                 )
                 var_mux = MUX21(
-                    is_safe=False, level=x.level, level1=term.level1, leve2=term.level1
+                    is_safe=False, rank=x.rank, rank1=term.rank1, leve2=term.rank1
                 )
                 body1, body2 = body_mux(x.pop("body"))
-                var1, out1 = LAM(level=x.level + 1)(None, body1, term.pop("out1"))
-                var2, out2 = LAM(level=x.level + 1)(None, body2, term.pop("out2"))
+                var1, out1 = LAM(rank=x.rank + 1)(None, body1, term.pop("out1"))
+                var2, out2 = LAM(rank=x.rank + 1)(None, body2, term.pop("out2"))
                 var_mux(var1, var2, x.pop("var"))
                 collect(term)
                 continue
@@ -518,9 +445,9 @@ def reduce(main: MAIN) -> None:
                 if not x.is_safe:
                     continue
                 term.is_safe = True
-                term.level = x.level
-                term.level1 += x.level1
-                term.level2 += x.level1
+                term.rank = x.rank
+                term.rank1 += x.rank1
+                term.rank2 += x.rank1
                 link(x.pop("out"), x.pop("in1"))
                 collect(x)
                 stack.append((False, port, term))
@@ -534,7 +461,7 @@ def reduce(main: MAIN) -> None:
                 # -------------------- MUX-MUX-elim aka DUP-PAR (equal)
                 # out1 = in1
                 # out2 = in2
-                if term.level == x.level:
+                if term.rank == x.rank:
                     link(x.pop("in1"), term.pop("out1"))
                     link(x.pop("in2"), term.pop("out2"))
                     collect(term)
@@ -547,14 +474,10 @@ def reduce(main: MAIN) -> None:
                 # out2 = MUX21 x21 x22
                 # x11, x21 = MUX12 in1
                 # x12, x22 = MUX12 in2
-                mux_1 = MUX12(level=x.level + 1, level1=x.level1, level2=x.level2)
-                mux_2 = MUX12(level=x.level + 1, level1=x.level1, level2=x.level2)
-                mux1_ = MUX12(
-                    level=term.level + 1, level1=term.level1, level2=term.level2
-                )
-                mux2_ = MUX12(
-                    level=term.level + 1, level1=term.level1, level2=term.level2
-                )
+                mux_1 = MUX12(rank=x.rank + 1, rank1=x.rank1, rank2=x.rank2)
+                mux_2 = MUX12(rank=x.rank + 1, rank1=x.rank1, rank2=x.rank2)
+                mux1_ = MUX12(rank=term.rank + 1, rank1=term.rank1, rank2=term.rank2)
+                mux2_ = MUX12(rank=term.rank + 1, rank1=term.rank1, rank2=term.rank2)
                 x11, x21 = mux_1(x.pop("in1"))
                 x12, x22 = mux_2(x.pop("in2"))
                 mux1_(x11, x12, term.pop("out1"))
@@ -593,6 +516,89 @@ def reduce(main: MAIN) -> None:
                 stack.append((False, port, term))
                 continue
 
+        if isinstance(term, APP):
+            assert port == "out"
+            lhs_port, lhs = assume_some(term.lhs)
+
+            # term = APP lhs rhs
+            # lhs = {BOT,TOP}
+            # ------------------ APP-BOT, APP-TOP
+            # term = lhs
+            if isinstance(lhs, (BOT, TOP)):
+                link(term.pop("out"), term.pop("lhs"))
+                collect(term)
+                continue
+
+            # term = APP lhs rhs
+            # lhs = LAM var body
+            # ------------------ APP-LAM aka beta
+            # term = body
+            # var = rhs
+            if isinstance(lhs, LAM):
+                assert lhs_port == "out"
+                body_port, body = assume_some(lhs.body)
+                link(term.pop(port), lhs.pop("body"))
+                if lhs.var is not None:
+                    link(lhs.pop("var"), term.pop("rhs"))
+                collect(term)
+                stack.append((False, body_port, body))
+                continue
+
+            # term = APP lhs rhs
+            # lhs = MUX21 lhs1 lhs2
+            # ---------------------- APP-MUX21 aka APP-PAR
+            # term = MUX21 app1 app2
+            # rhs1, rhs2 = MUX12 rhs
+            # app1 = APP lhs1 rhs1
+            # app2 = APP lhs2 rhs2
+            if isinstance(lhs, MUX21):
+                assert lhs_port == "out"
+                rhs_mux = MUX12(rank=lhs.rank, rank1=lhs.rank, rank2=lhs.rank)
+                out_mux = MUX12(rank=lhs.rank, rank1=lhs.rank, rank2=lhs.rank)
+                rhs1, rhs2 = rhs_mux(term.pop("rhs"))
+                app1 = APP(rank=term.rank + 1)(lhs.pop("in1"), rhs1)
+                app2 = APP(rank=term.rank + 1)(lhs.pop("in2"), rhs2)
+                out_mux(app1, app2, term.pop("out"))
+                collect(term)
+                # FIXME Is this right? HVM doesn't push here.
+                stack.append((False,) + assume_some(app2))
+                stack.append((False,) + assume_some(app1))
+                continue
+
+            # term = APP lhs rhs
+            # lhs = JOIN lhs1 lhs2
+            # ---------------------- APP-JOIN
+            # term = JOIN app1 app2
+            # rhs1, rhs2 = MUX21 rhs
+            # app1 = APP in1 rhs1
+            # app2 = APP in2 rhs2
+            if isinstance(lhs, JOIN):
+                assert lhs_port == "out"
+                raise NotImplementedError("TODO")
+
+        if isinstance(term, JOIN):
+            assert port == "out"
+            lhs_port, lhs = assume_some(term.lhs)
+            rhs_port, rhs = assume_some(term.rhs)
+
+            # term = JOIN lhs rhs
+            # lhs = BOT
+            # ------------------ JOIN-BOT-left
+            # term = rhs
+            if isinstance(lhs, BOT):
+                link(term.pop("out"), term.pop("rhs"))
+                collect(term)
+                continue
+
+            # term = JOIN lhs rhs
+            # rhs = BOT
+            # ------------------ JOIN-BOT-right
+            # term = lhs
+            if isinstance(rhs, BOT):
+                link(term.pop("out"), term.pop("lhs"))
+                collect(term)
+                continue
+
 
 ################################################################################
 # Parsing : text -> graph
@@ -615,47 +621,47 @@ def parse(text: str) -> MAIN:
     tokens = text.strip().split()
     tokens.reverse()
     env: Env = {}
-    level = 0
-    port, term = _parse(tokens, env, level)
+    rank = 0
+    port, term = _parse(tokens, env, rank)
     assert not tokens, f"Extra input: {' '.join(tokens)}"
 
-    main = MAIN(level=0)
+    main = MAIN(rank=0)
     link(("in1", main), (port, term))
     if DEBUG:
         validate(main)
     return main
 
 
-def _parse(tokens: List[str], env: Env, level: int) -> Tuple[str, Term]:
+def _parse(tokens: List[str], env: Env, rank: int) -> Tuple[str, Term]:
     token = tokens.pop()
 
     if token == "BOT":
-        return "out", BOT(level=level)
+        return "out", BOT(rank=rank)
 
     if token == "TOP":
-        return "out", TOP(level=level)
+        return "out", TOP(rank=rank)
 
     if token == "JOIN":
-        lhs_ = _parse(tokens, env, level)
-        rhs_ = _parse(tokens, env, level)
-        return JOIN(level=level)(lhs_, rhs_)
+        lhs_ = _parse(tokens, env, rank)
+        rhs_ = _parse(tokens, env, rank)
+        return JOIN(rank=rank)(lhs_, rhs_)
 
     if token == "APP":
-        lhs_ = _parse(tokens, env, level)
-        # FIXME wrap each env variable in a MUX11(level=n, level1=1)
+        lhs_ = _parse(tokens, env, rank)
+        # FIXME wrap each env variable in a MUX11(rank=n, rank1=1)
         # as per Asperti98 pp 357 Fig 12.5
-        rhs_ = _parse(tokens, env, level + 1)
-        return APP(level=level)(lhs_, rhs_)
+        rhs_ = _parse(tokens, env, rank + 1)
+        return APP(rank=rank)(lhs_, rhs_)
 
     if token == "LAM":
         name = tokens.pop()
         assert re_varname.match(name), name
-        lam = LAM(level=level)
+        lam = LAM(rank=rank)
 
         # Parse in an modified environment.
         old = env.get(name)
         env[name] = "var", lam
-        link(("body", lam), _parse(tokens, env, level))
+        link(("body", lam), _parse(tokens, env, rank))
         var_port, var = env.pop(name)
         if old is not None:
             env[name] = old
@@ -677,12 +683,12 @@ def _parse(tokens: List[str], env: Env, level: int) -> Tuple[str, Term]:
     if token == "LET":  # syntactic sugar
         name = tokens.pop()
         assert re_varname.match(name), name
-        defn_port, defn = _parse(tokens, env, level)
+        defn_port, defn = _parse(tokens, env, rank)
 
         # Parse in an modified environment.
         old = env.get(name)
         env[name] = defn_port, defn
-        result = _parse(tokens, env, level)
+        result = _parse(tokens, env, rank)
         var_port, var = env.pop(name)
         if old is not None:
             env[name] = old
@@ -706,12 +712,12 @@ def _parse(tokens: List[str], env: Env, level: int) -> Tuple[str, Term]:
     if token == "LETREC":  # syntactic sugar
         name = tokens.pop()
         assert re_varname.match(name), name
-        mux = MUX12(level=level, level1=0, level2=0)
+        mux = MUX12(rank=rank, rank1=0, rank2=0)
 
         # Parse in an modified environment.
         old = env.get(name)
         env[name] = "out1", mux
-        body_port, body = _parse(tokens, env, level)
+        body_port, body = _parse(tokens, env, rank)
         var_port, var = env.pop(name)
         if old is not None:
             env[name] = old
@@ -728,15 +734,15 @@ def _parse(tokens: List[str], env: Env, level: int) -> Tuple[str, Term]:
         name = token
         assert name in env, name
         # Add a MUX12 for each occurrence; the final MUX12 will later be removed.
-        out1, out2 = MUX12(level=level, level1=0, level2=0)(env[name])
+        out1, out2 = MUX12(rank=rank, rank1=0, rank2=0)(env[name])
         env[name] = out1  # save for later
         return out2  # use now
 
     if re_numeral.match(token):
         # Create a Church numeral.
         n = int(token)
-        term = LAM(level=level)
-        body = LAM(level=level)
+        term = LAM(rank=rank)
+        body = LAM(rank=rank)
         link(("body", term), ("out", body))
         if n == 0:
             link(("body", body), ("var", body))
@@ -744,9 +750,9 @@ def _parse(tokens: List[str], env: Env, level: int) -> Tuple[str, Term]:
         f: Tuple[str, Term] = ("var", term)
         x: Tuple[str, Term] = ("var", body)
         for _ in range(n - 1):
-            f, f_temp = MUX12(level=level, level1=0, level2=0)(f)
-            x = APP(level=level)(f_temp, x)
-        APP(level=level)(f, x, ("body", body))
+            f, f_temp = MUX12(rank=rank, rank1=0, rank2=0)(f)
+            x = APP(rank=rank)(f_temp, x)
+        APP(rank=rank)(f, x, ("body", body))
         return "out", term
 
     raise ValueError(f"Unhandled token: {token}")
@@ -755,8 +761,8 @@ def _parse(tokens: List[str], env: Env, level: int) -> Tuple[str, Term]:
 if DEBUG >= 2:
     _parse_base = _parse
 
-    def _parse(tokens: List[str], env: Env, level: int) -> Tuple[str, Term]:
-        port, term = _parse_base(tokens, env, level)
+    def _parse(tokens: List[str], env: Env, rank: int) -> Tuple[str, Term]:
+        port, term = _parse_base(tokens, env, rank)
         print(port, type(term).__name__)
         return port, term
 
@@ -837,10 +843,10 @@ def validate(root):
     while pending:
         source = pending.pop()
 
-        # Check that .level has been set.
-        assert source.level != INVALID
-        assert getattr(source, "level1", None) != INVALID
-        assert getattr(source, "level2", None) != INVALID
+        # Check that .rank has been set.
+        assert source.rank != INVALID
+        assert getattr(source, "rank1", None) != INVALID
+        assert getattr(source, "rank2", None) != INVALID
 
         # Explore neighbors.
         for source_port in source.ports:
