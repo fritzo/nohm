@@ -46,6 +46,9 @@ PARSE_EXAMPLES = [
     ("1", "LAM a LAM b APP a b"),
     ("2", "LAM a LAM b APP a APP a b"),
     ("3", "LAM a LAM b APP a APP a APP a b"),
+    ("IMPORT lib ok", "LAM a a"),
+    ("IMPORT lib true", "LAM a LAM b a"),
+    ("IMPORT lib false", "LAM a LAM b b"),
 ]
 
 

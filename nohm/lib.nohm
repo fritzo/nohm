@@ -1,0 +1,17 @@
+LET ok LAM x x
+
+LET true LAM x LAM y x
+LET false LAM x LAM y y
+
+LET none LAM f LAM g f
+LET some LAM x LAM f LAM g APP g x
+
+LET pair LAM x LAM y LAM f APP APP f x y
+LET inl LAM x LAM f LAM g APP f x
+LET inr LAM y LAM f LAM g APP g y
+
+LET zero LAM z LAM s z
+LET succ LAM n LAM z LAM s APP s APP APP n s z
+
+LET nil LAM n LAM c n
+LET cons LAM head LAM tail LAM n LAM c APP APP c head tail
