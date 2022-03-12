@@ -768,7 +768,8 @@ def _parse(tokens: List[str], env: Env, rank: int) -> Tuple[str, Term]:
         # Import a library of definitions.
         name = tokens.pop()
         filename = os.path.join(os.path.dirname(__file__), f"{name}.nohm")
-        text = open(filename, "rt").read()
+        with open(filename, "rt") as f_:
+            text = f_.read()
         tokens.extend(_tokenize(text))
         return _parse(tokens, env, rank)
 
